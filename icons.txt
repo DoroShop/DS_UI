@@ -1,0 +1,82 @@
+✅ Most-used icons
+📦 Shopping & E-commerce
+ShoppingCartIcon 🛒
+
+CreditCardIcon 💳
+
+TagIcon 🏷️
+
+CurrencyDollarIcon 💵
+
+👤 User & Account
+UserIcon 👤
+
+UserCircleIcon 👥
+
+LockClosedIcon 🔒
+
+KeyIcon 🔑
+
+🏠 Navigation & Layout
+HomeIcon 🏠
+
+MenuIcon ☰ (hamburger)
+
+Bars3Icon ☰ (alternative hamburger)
+
+XMarkIcon ✖️ (close icon)
+
+ChevronDownIcon ▼
+
+ChevronUpIcon ▲
+
+ChevronLeftIcon ◀
+
+ChevronRightIcon ▶
+
+🔍 Search & Actions
+MagnifyingGlassIcon 🔍
+
+PlusIcon ➕
+
+MinusIcon ➖
+
+PencilSquareIcon ✏️ (edit)
+
+TrashIcon 🗑️ (delete)
+
+CheckIcon ✅
+
+XCircleIcon ❌
+
+🗂️ Status & Alerts
+ExclamationTriangleIcon ⚠️ (warning)
+
+InformationCircleIcon ℹ️ (info)
+
+CheckCircleIcon ✅
+
+XCircleIcon ❌
+
+📄 Files & Documents
+DocumentIcon 📄
+
+ClipboardIcon 📋
+
+PaperAirplaneIcon 📨 (send)
+
+❤️ Favorites & Social
+HeartIcon ❤️
+
+StarIcon ⭐
+
+ChatBubbleLeftIcon 💬
+
+BellIcon 🔔 (notifications)
+
+⚙️ Settings & Tools
+CogIcon ⚙️
+
+AdjustmentsHorizontalIcon 🎚️ (filters/settings)
+
+WrenchIcon 🔧

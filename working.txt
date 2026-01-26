@@ -1,0 +1,3 @@
+finalize the login and register
+deduct the product stock if order is successfull
+update vendor order if the order is successfull

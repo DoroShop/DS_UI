@@ -245,7 +245,7 @@ const qrPaymentData = ref({
 
 const getShippingOptionLabel = (delivery: string) => {
   if (delivery === "pickup") return "Pick Up";
-  if (delivery === "agreement") return "Customer Agreement";
+  if (delivery === "agreement") return "Connect with Seller";
   return delivery;
 };
 

@@ -88,11 +88,11 @@ async function handleRegionChange(code) {
   regForm.address.barangay = "";
   regForm.address.barangayCode = "";
   regForm.address.zipCode = "";
-  
+
   // Set new region
   regForm.address.regionCode = code;
   regForm.address.region = locationStore.regions.find((r) => r.code === code)?.name || "";
-  
+
   // Fetch provinces if region selected
   if (code) {
     try {
@@ -116,11 +116,11 @@ async function handleProvinceChange(code) {
   regForm.address.barangay = "";
   regForm.address.barangayCode = "";
   regForm.address.zipCode = "";
-  
+
   // Set new province
   regForm.address.provinceCode = code;
   regForm.address.province = provincesForRegion.value.find((p) => p.code === code)?.name || "";
-  
+
   // Fetch cities if province selected
   if (code) {
     try {
@@ -142,17 +142,17 @@ async function handleCityChange(code) {
   regForm.address.barangay = "";
   regForm.address.barangayCode = "";
   regForm.address.zipCode = "";
-  
+
   // Set new city
   regForm.address.cityCode = code;
   const selectedCity = citiesForProvince.value.find((c) => c.code === code);
   regForm.address.city = selectedCity?.name || "";
-  
+
   // Auto-fill zip from city if available
   if (selectedCity?.zipCode) {
     regForm.address.zipCode = selectedCity.zipCode;
   }
-  
+
   // Fetch barangays if city selected
   if (code) {
     try {
@@ -172,7 +172,7 @@ async function handleBarangayChange(code) {
   regForm.address.barangayCode = code;
   const barangay = barangaysForCity.value.find((b) => b.code === code);
   regForm.address.barangay = barangay?.name || "";
-  
+
   // Try to get zip code if not already set
   if (regForm.address.cityCode && barangay?.name && !regForm.address.zipCode) {
     try {
@@ -223,12 +223,12 @@ async function handleRegister() {
     });
     return;
   }
-  
+
   try {
     console.log('🔄 Starting registration process for:', regForm.email);
     await authStore.requestOtp(regForm.email);
     await nextTick();
-    
+
     // Only proceed if no error occurred
     if (!authStore.registerError) {
       console.log('✅ OTP sent successfully, switching to verify view');
@@ -267,12 +267,12 @@ function onKeyDown(e, i) {
 
 async function handleVerify() {
   if (!otpComplete.value) return;
-  
+
   try {
     let otp = otpDigits.value.join("");
     await authStore.verifyAndRegister({ ...regForm, otp });
     await nextTick();
-    
+
     // Only attempt login if registration was successful
     if (!authStore.verifyError && !authStore.registerError) {
       await authStore.loginUser(regForm.email, regForm.password);
@@ -306,7 +306,7 @@ function formatResendCountdown() {
 
 async function resendOtp() {
   if (resendCountdown.value > 0) return;
-  
+
   try {
     await authStore.requestOtp(regForm.email);
     if (!authStore.registerError) {
@@ -348,7 +348,7 @@ async function handleFacebook() {
       <nav class="auth-tabs" role="tablist">
         <button role="tab" :aria-selected="view === 'login'" :class="['auth-tab', { active: view === 'login' }]"
           @click="switchView('login')">
-          
+
           <p>Login</p>
         </button>
         <button role="tab" :aria-selected="view === 'register'" :class="['auth-tab', { active: view === 'register' }]"
@@ -382,7 +382,7 @@ async function handleFacebook() {
           <p v-if="authStore.loading">Logging in...</p>
           <p v-else>Login</p>
         </button>
-
+<!-- 
         <div class="divider"><span>or continue with</span></div>
         <div class="social-row">
           <button type="button" class="btn social google" @click="handleGoogle">
@@ -393,7 +393,7 @@ async function handleFacebook() {
             <img src="../assets/icons8-facebook-32.png" alt="">
             <p>Facebook</p>
           </button>
-        </div>
+        </div> -->
       </form>
 
       <!-- REGISTER -->
@@ -437,12 +437,8 @@ async function handleFacebook() {
         <!-- REGION SELECT -->
         <div class="form-group">
           <label class="select-label">Region</label>
-          <select
-            v-model="regForm.address.regionCode"
-            @change="handleRegionChange($event.target.value)"
-            :disabled="locationStore.loadingRegions"
-            required
-          >
+          <select v-model="regForm.address.regionCode" @change="handleRegionChange($event.target.value)"
+            :disabled="locationStore.loadingRegions" required>
             <option value="" disabled>
               {{ locationStore.loadingRegions ? 'Loading regions...' : 'Select Region' }}
             </option>
@@ -455,12 +451,8 @@ async function handleFacebook() {
         <!-- PROVINCE SELECT -->
         <div class="form-group">
           <label class="select-label">Province</label>
-          <select
-            v-model="regForm.address.provinceCode"
-            @change="handleProvinceChange($event.target.value)"
-            :disabled="!regForm.address.regionCode || locationStore.loadingProvinces"
-            required
-          >
+          <select v-model="regForm.address.provinceCode" @change="handleProvinceChange($event.target.value)"
+            :disabled="!regForm.address.regionCode || locationStore.loadingProvinces" required>
             <option value="" disabled>
               {{ locationStore.loadingProvinces ? 'Loading provinces...' : 'Select Province' }}
             </option>
@@ -473,12 +465,8 @@ async function handleFacebook() {
         <!-- CITY/MUNICIPALITY SELECT -->
         <div class="form-group">
           <label class="select-label">City / Municipality</label>
-          <select
-            v-model="regForm.address.cityCode"
-            @change="handleCityChange($event.target.value)"
-            :disabled="!regForm.address.provinceCode || locationStore.loadingCities"
-            required
-          >
+          <select v-model="regForm.address.cityCode" @change="handleCityChange($event.target.value)"
+            :disabled="!regForm.address.provinceCode || locationStore.loadingCities" required>
             <option value="" disabled>
               {{ locationStore.loadingCities ? 'Loading cities...' : 'Select City / Municipality' }}
             </option>
@@ -491,12 +479,8 @@ async function handleFacebook() {
         <!-- BARANGAY SELECT -->
         <div class="form-group">
           <label class="select-label">Barangay</label>
-          <select
-            v-model="regForm.address.barangayCode"
-            @change="handleBarangayChange($event.target.value)"
-            :disabled="!regForm.address.cityCode || locationStore.loadingBarangays"
-            required
-          >
+          <select v-model="regForm.address.barangayCode" @change="handleBarangayChange($event.target.value)"
+            :disabled="!regForm.address.cityCode || locationStore.loadingBarangays" required>
             <option value="" disabled>
               {{ locationStore.loadingBarangays ? 'Loading barangays...' : 'Select Barangay' }}
             </option>
@@ -508,14 +492,8 @@ async function handleFacebook() {
 
         <!-- ZIP CODE -->
         <div class="form-group floating-label">
-          <input
-            v-model.trim="regForm.address.zipCode"
-            name="zip-code"
-            type="text"
-            required
-            placeholder=" "
-            :disabled="locationStore.loadingZip"
-          />
+          <input v-model.trim="regForm.address.zipCode" name="zip-code" type="text" required placeholder=" "
+            :disabled="locationStore.loadingZip" />
           <label>Zip Code {{ locationStore.loadingZip ? '(loading...)' : '' }}</label>
         </div>
 
@@ -524,9 +502,10 @@ async function handleFacebook() {
           <input type="checkbox" v-model="regForm.acceptTos" />
           <span>I agree to the Terms</span>
         </label>
-        
+
         <!-- Debug info for development -->
-        <div v-if="false" style="background: #f5f5f5; padding: 10px; margin: 10px 0; font-size: 12px; border-radius: 4px;">
+        <div v-if="false"
+          style="background: #f5f5f5; padding: 10px; margin: 10px 0; font-size: 12px; border-radius: 4px;">
           <strong>Form Validation Debug:</strong><br>
           Can Submit: {{ canSubmitRegister }}<br>
           Name: {{ !!regForm.name }}<br>
@@ -540,7 +519,7 @@ async function handleFacebook() {
           Zip Code: {{ !!regForm.address.zipCode }}<br>
           Terms Accepted: {{ regForm.acceptTos }}<br>
         </div>
-        
+
         <button type="submit" class="btn primary full" :disabled="!canSubmitRegister || authStore.loading">
           <p v-if="authStore.loading">Please wait...</p>
           <p v-else>Register</p>
@@ -857,7 +836,7 @@ select:focus {
 }
 
 .verify-wrapper p {
-  color: black;
+  color: var(--text-primary);
   width: 100%;
   text-align: center;
 }
@@ -867,7 +846,7 @@ select:focus {
   text-align: center;
   font-size: 1.5rem;
   font-weight: bold;
-  color: #353535;
+  color: var(--text-primary);
   margin-bottom: 0.75rem;
 }
 

@@ -245,7 +245,7 @@ const qrPaymentData = ref({
 
 const getShippingOptionLabel = (delivery: string) => {
   if (delivery === "pickup") return "Pick Up";
-  if (delivery === "agreement") return "Connect with Seller";
+  if (delivery === "agreement") return "Customer Agreement";
   return delivery;
 };
 
@@ -694,7 +694,7 @@ onMounted(async () => {
                 <div class="agreement-option">
                   <span class="option-label">
                     <UserIcon class="option-icon" />
-                    Customer Agreement
+                    Connect with Seller
                   </span>
                   <small>Discuss delivery with seller</small>
                 </div>

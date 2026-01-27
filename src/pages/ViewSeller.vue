@@ -624,11 +624,11 @@
 								<span class="stat-label">Followers</span>
 							</div>
 
-							<div class="quick-stat">
+							<!-- <div class="quick-stat">
 								<TruckIcon class="stat-icon blue" />
 								<span class="stat-value">{{ formatNumber(totalSales) }}</span>
 								<span class="stat-label">Sales</span>
-							</div>
+							</div> -->
 						</div>
 
 						<!-- Store Description -->
@@ -751,7 +751,7 @@
 							vendorStore.vendorProducts?.length || 0
 						}}</span>
 					</button>
-					<button
+					<!-- <button
 						class="tab-btn"
 						:class="{ active: activeTab === 'reviews' }"
 						@click="switchTab('reviews')"
@@ -759,7 +759,7 @@
 						<StarIcon class="tab-icon" />
 						<span>Reviews</span>
 						<span class="tab-count">{{ totalReviews }}</span>
-					</button>
+					</button> -->
 					<button
 						class="tab-btn"
 						:class="{ active: activeTab === 'about' }"
@@ -897,7 +897,7 @@
 		</div>
 
 		<!-- Reviews Tab Content -->
-		<div v-if="activeTab === 'reviews'" class="reviews-section">
+		<!-- <div v-if="activeTab === 'reviews'" class="reviews-section">
 			<div class="container">
 				<div class="reviews-header">
 					<h2>Customer Reviews</h2>
@@ -925,7 +925,7 @@
 					<p>Customer reviews will be displayed here once available.</p>
 				</div>
 			</div>
-		</div>
+		</div> -->
 
 		<!-- About Tab Content -->
 		<div v-if="activeTab === 'about'" class="about-section">

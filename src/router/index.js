@@ -70,7 +70,7 @@ const routes = [
   {
     path: "/messages",
     component: CustomerMessages,
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, hideMobileNav: true },
   },
   {
     path: "/message/:chatId",

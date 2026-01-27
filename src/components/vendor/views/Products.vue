@@ -154,7 +154,8 @@ const handleFileUpload = async (e: Event) => {
 		formData.append("images", file);
 	});
 
-	const endpoint = "http://192.168.1.9:3001/v1/upload";
+	// Use configured API base URL when available. Falls back to relative "/v1" when not set (works in production with same-origin API).
+	const endpoint = API_BASE_URL ? `${API_BASE_URL.replace(/\/\/$/, '')}/upload` : "/v1/upload";
 
 	try {
 		const response = await fetch(endpoint, {

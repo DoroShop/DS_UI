@@ -212,7 +212,7 @@ function extractUploadedUrl(resp: any): string | null {
   );
 }
 
-export const useVendorDashboardStore = defineStore("vendor", {
+export const useVendorDashboardStore = defineStore("vendor-dashboard", {
   state: (): State => ({
     vendor: null,
     vendorProducts: [],

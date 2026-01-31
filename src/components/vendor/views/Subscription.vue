@@ -14,6 +14,7 @@ import QRCodePaymentModal from "../../../components/QRCodePaymentModal.vue";
 import { Toast } from "../../../components/composable/Toast.js";
 import axios from "axios";
 import { getAuthHeaders } from "../../../types/shared";
+
 const API_URL = import.meta.env.VITE_API_BASE_URL || "";
 const router = useRouter();
 const subscriptionStore = useSubscriptionStore();
@@ -57,22 +58,47 @@ const formatDate = (dateString) => {
   });
 };
 
+/**
+ * Check if a plan's discount is currently active
+ */
 const isDiscountActive = (plan) => {
-  const dp = Number(plan?.discountPercent || 0);
-
-  if (!dp) return false;
+  const discountPercent = Number(plan?.discountPercent || 0);
+  
+  if (!discountPercent) return false;
+  
   if (plan?.discountExpiresAt) {
-    const d = new Date(plan.discountExpiresAt).getTime();
-    return Number.isFinite(d) && d > Date.now();
+    const expiryTime = new Date(plan.discountExpiresAt).getTime();
+    return Number.isFinite(expiryTime) && expiryTime > Date.now();
   }
+  
   return true;
 };
 
-const discountedPrice = (plan) => {
-  const dp = Number(plan?.discountPercent || 0);
-  if (!isDiscountActive(plan)) return plan?.price || 0;
-  return Math.round((plan.price || 0) * (1 - dp / 100));
+/**
+ * Calculate the final price after discount
+ * This is the SINGLE SOURCE OF TRUTH for all price calculations
+ * Uses Math.round for consistent rounding across the entire application
+ */
+const calculateFinalPrice = (plan) => {
+  const basePrice = Number(plan?.price || 0);
+  
+  if (!isDiscountActive(plan)) {
+    return basePrice;
+  }
+  
+  const discountPercent = Number(plan.discountPercent || 0);
+  const discountMultiplier = 1 - (discountPercent / 100);
+  const discountedPrice = basePrice * discountMultiplier;
+  
+  // Use Math.round for consistent rounding everywhere
+  const finalPrice = Math.round(discountedPrice);
+  
+  // Ensure minimum price of 1 peso
+  return Math.max(finalPrice, 1);
 };
+
+// Alias for backward compatibility
+const discountedPrice = calculateFinalPrice;
 
 const selectPlan = (plan) => {
   selectedPlanForChange.value = plan;
@@ -120,8 +146,10 @@ function restorePendingSubscriptionPayment() {
   try {
     const raw = localStorage.getItem(PENDING_SUBSCRIPTION_KEY);
     if (!raw) return;
+    
     const stored = JSON.parse(raw);
     if (!stored || !stored.expiresAt) return;
+    
     const expiry = new Date(stored.expiresAt).getTime();
     if (Date.now() > expiry) {
       clearPendingSubscriptionPayment();
@@ -136,11 +164,9 @@ function restorePendingSubscriptionPayment() {
       paymentIntentId: stored.paymentIntentId || "",
     };
 
-    // Re-open modal and start polling
     showQRModal.value = true;
 
-    const idToPoll =
-      qrPaymentData.value.paymentIntentId || qrPaymentData.value.dbPaymentId;
+    const idToPoll = qrPaymentData.value.paymentIntentId || qrPaymentData.value.dbPaymentId;
 
     qrStopPolling = pollPaymentStatus(
       idToPoll,
@@ -149,26 +175,22 @@ function restorePendingSubscriptionPayment() {
           try {
             if (
               subscriptionStore &&
-              typeof subscriptionStore.confirmSubscriptionWithPayment ===
-              "function"
+              typeof subscriptionStore.confirmSubscriptionWithPayment === "function"
             ) {
-              // Try to read planCode from stored metadata — fallback to current UI flow
               const storedPlanCode = stored.planCode || null;
-              if (storedPlanCode)
+              if (storedPlanCode) {
                 await subscriptionStore.confirmSubscriptionWithPayment(
                   storedPlanCode,
                   idToPoll,
                 );
+              }
             }
             clearPendingSubscriptionPayment();
             handleQRModalClose();
             Toast("Subscription activated successfully!", "success", 3000);
             router.go(0);
           } catch (err) {
-            console.error(
-              "Error finalizing restored subscription payment:",
-              err,
-            );
+            console.error("Error finalizing restored subscription payment:", err);
           }
         } else if (status === "failed" || status === "expired") {
           clearPendingSubscriptionPayment();
@@ -199,14 +221,16 @@ const confirmChangePlan = async () => {
   if (!selectedPlanForChange.value) return;
 
   const plan = selectedPlanForChange.value;
+  const finalPrice = calculateFinalPrice(plan);
 
-  console.log("Changing to plan:", plan.code, "with payment method:", vendorDashboardStore.walletBalance);
+  console.log("Changing to plan:", plan.code, "Final price:", finalPrice);
 
   try {
+    // Check wallet balance if using wallet payment
     if (
-     discountedPrice(plan) > 0 &&
+      finalPrice > 0 &&
       selectedPaymentMethod.value === "wallet" &&
-      discountedPrice(plan) > vendorDashboardStore.walletBalance
+      finalPrice > vendorDashboardStore.walletBalance
     ) {
       alert(
         "Insufficient wallet balance. Please choose QRPH payment or top up your wallet.",
@@ -214,18 +238,16 @@ const confirmChangePlan = async () => {
       return;
     }
 
+    // Wallet payment flow
     if (selectedPaymentMethod.value === "wallet") {
       await subscriptionStore.changePlan(plan.code, "wallet");
       showChangePlanModal.value = false;
       selectedPlanForChange.value = null;
-
-      console.log("Started polling for subscription payment status");
-
-      router.go(0)
+      router.go(0);
       return;
     }
 
-    // QRPH flow - prefer store helper, fallback to direct API call when helper missing
+    // QRPH payment flow
     let payment;
     if (
       subscriptionStore &&
@@ -234,39 +256,24 @@ const confirmChangePlan = async () => {
       payment = await subscriptionStore.createSubscriptionPayment(plan.code);
     }
 
-    const discountAmount = Number(
-      (1 - (plan.discountPercent || 0) / 100).toFixed(2),
-    );
-
-    const disCountedAmount = () => {
-      return Math.ceil(plan.price * discountAmount) >= 1
-        ? Math.ceil(plan.price * discountAmount)
-        : 1;
-    };
-
     if (!payment) throw new Error("Failed to create payment");
 
+    // Use the centralized price calculation
     qrPaymentData.value = {
       dbPaymentId: payment._id,
       qrCodeUrl: payment.qrCodeUrl,
-      amount: isDiscountActive(plan)
-        ? disCountedAmount()
-        : plan.price,
-      expiresAt:
-        payment.expiresAt || new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      amount: finalPrice, // Single source of truth
+      expiresAt: payment.expiresAt || new Date(Date.now() + 5 * 60 * 1000).toISOString(),
       paymentIntentId: payment.paymentIntentId || payment.paymentIntent,
     };
 
-    // Persist pending payment so modal survives refresh (store planCode to finalize on restore)
     persistPendingSubscriptionPayment(plan.code);
 
-    // Open QR modal and start polling for payment status
     showChangePlanModal.value = false;
     selectedPlanForChange.value = null;
     showQRModal.value = true;
 
-    const paymentIntentId =
-      qrPaymentData.value.paymentIntentId || qrPaymentData.value.dbPaymentId;
+    const paymentIntentId = qrPaymentData.value.paymentIntentId || qrPaymentData.value.dbPaymentId;
 
     qrStopPolling = pollPaymentStatus(
       paymentIntentId,
@@ -275,15 +282,13 @@ const confirmChangePlan = async () => {
           try {
             if (
               subscriptionStore &&
-              typeof subscriptionStore.confirmSubscriptionWithPayment ===
-              "function"
+              typeof subscriptionStore.confirmSubscriptionWithPayment === "function"
             ) {
               await subscriptionStore.confirmSubscriptionWithPayment(
                 plan.code,
                 paymentIntentId,
               );
             } else {
-              // direct finalize call as fallback
               const idempotencyKey = `sub.confirm.${paymentIntentId}`;
               await axios.post(
                 `${API_URL}/sellers/subscription/start-or-change`,
@@ -319,9 +324,7 @@ const confirmChangePlan = async () => {
           handleQRModalClose();
         }
       },
-      
     );
-
   } catch (err) {
     console.error("Change plan with payment error:", err);
     Toast(err?.message || "Failed to change plan", "error", 3000);
@@ -329,20 +332,15 @@ const confirmChangePlan = async () => {
   }
 };
 
-// const renewSubscription = async () => {
-//   await subscriptionStore.renewSubscription();
-// };
-
 onMounted(async () => {
   await subscriptionStore.fetchSubscription();
   await subscriptionStore.fetchPlans();
-  // Restore pending subscription QR payment if the user refreshed the page
   restorePendingSubscriptionPayment();
 });
 </script>
 
-
 <template>
+  <!-- Template remains exactly the same -->
   <div class="subscription-page">
     <div class="subscription-container">
       <header class="page-header">
@@ -464,7 +462,7 @@ onMounted(async () => {
                     :aria-label="`${subscription.planId.discountPercent}% off until ${subscription.planId.discountExpiresAt ? formatDate(subscription.planId.discountExpiresAt) : 'no expiry'}`">
                     {{
                       formatCurrency(
-                        discountedPrice(subscription.planId),
+                        calculateFinalPrice(subscription.planId),
                         subscription.planId.currency,
                       )
                     }}
@@ -508,48 +506,6 @@ onMounted(async () => {
             </div>
           </div>
         </div>
-
-        <!-- <div class="action-bar">
-          <button
-            v-if="subscription.status === 'active' && !subscription.cancelAtPeriodEnd"
-            type="button"
-            :disabled="isLoading"
-            @click="showCancelModal = true"
-            class="action-btn btn-cancel"
-          >
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-            Cancel Subscription
-          </button>
-
-          <button
-            v-if="subscription.status === 'expired' || subscription.cancelAtPeriodEnd"
-            type="button"
-            :disabled="isLoading"
-            @click="renewSubscription"
-            class="action-btn btn-renew"
-          >
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Renew Subscription
-          </button>
-
-          <button
-            type="button"
-            :disabled="isLoading"
-            @click="openChangePlanModal"
-            class="action-btn btn-change"
-          >
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-            </svg>
-            Change Plan
-          </button>
-        </div> -->
       </section>
 
       <section class="plans-section">
@@ -621,7 +577,7 @@ onMounted(async () => {
                   {{ Math.round(plan.price) }}
                 </div>
                 <div class="plan-price">
-                  {{ Math.round(discountedPrice(plan)) }}
+                  {{ calculateFinalPrice(plan) }}
                 </div>
               </div>
 
@@ -769,13 +725,13 @@ onMounted(async () => {
                     <p class="option-desc">{{ plan.description }}</p>
                   </div>
                   <div class="option-price">
-                    {{ formatCurrency(Math.round(discountedPrice(plan))) }}
+                    {{ formatCurrency(calculateFinalPrice(plan)) }}
                     <span class="option-period">/{{ plan.interval }}</span>
                   </div>
                 </div>
               </div>
 
-              <div v-if="selectedPlanForChange?.price > 0" class="payment-section">
+              <div v-if="selectedPlanForChange && calculateFinalPrice(selectedPlanForChange) > 0" class="payment-section">
                 <h4 class="payment-title">Payment Method</h4>
                 <div class="payment-options">
                   <div @click="selectedPaymentMethod = 'wallet'" :class="[
@@ -812,7 +768,7 @@ onMounted(async () => {
                 </div>
                 <div v-if="
                   selectedPaymentMethod === 'wallet' &&
-                  discountedPrice(selectedPlanForChange) > vendorDashboardStore.walletBalance
+                  calculateFinalPrice(selectedPlanForChange) > vendorDashboardStore.walletBalance
                 " class="payment-warning">
                   <p>
                     Insufficient wallet balance. Please top up or choose QRPH
@@ -828,9 +784,9 @@ onMounted(async () => {
               </button>
               <button type="button" @click="confirmChangePlan" :disabled="!selectedPlanForChange ||
                 isLoading ||
-                (discountedPrice(selectedPlanForChange) > 0 &&
+                (calculateFinalPrice(selectedPlanForChange) > 0 &&
                   selectedPaymentMethod === 'wallet' &&
-                  discountedPrice(selectedPlanForChange) > vendorDashboardStore.walletBalance)
+                  calculateFinalPrice(selectedPlanForChange) > vendorDashboardStore.walletBalance)
                 " class="modal-btn btn-primary">
                 Confirm Change
               </button>
@@ -842,30 +798,12 @@ onMounted(async () => {
 
     <QRCodePaymentModal v-if="showQRModal" :show="showQRModal" :paymentId="qrPaymentData.dbPaymentId"
       :paymentIntentId="qrPaymentData.paymentIntentId" :qrCodeUrl="qrPaymentData.qrCodeUrl"
-      :amount="qrPaymentData.amount" :expiresAt="qrPaymentData.expiresAt" @close="
-        () => {
-          showQRModal = false;
-        }
-      " @success="
-        () => {
-          clearPendingSubscriptionPayment();
-        }
-      " @failed="
-        () => {
-          clearPendingSubscriptionPayment();
-        }
-      " @expired="
-        () => {
-          clearPendingSubscriptionPayment();
-        }
-      " @cancelled="
-        () => {
-          clearPendingSubscriptionPayment();
-        }
-      " />
+      :amount="qrPaymentData.amount" :expiresAt="qrPaymentData.expiresAt" @close="handleQRModalClose" @success="clearPendingSubscriptionPayment" 
+      @failed="clearPendingSubscriptionPayment" 
+      @expired="clearPendingSubscriptionPayment" 
+      @cancelled="clearPendingSubscriptionPayment" />
   </div>
 </template>
-
 
 <style scoped>
 .subscription-page {

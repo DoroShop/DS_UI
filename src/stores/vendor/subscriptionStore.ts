@@ -73,6 +73,52 @@ export const useSubscriptionStore = defineStore("subscription", () => {
     return diffDays > 0 ? diffDays : 0;
   });
 
+  // Helper Functions - SINGLE SOURCE OF TRUTH for price calculations
+
+  /**
+   * Check if a plan's discount is currently active
+   * @param plan - The subscription plan object
+   * @returns true if discount is active, false otherwise
+   */
+  const isDiscountActive = (plan: Plan | null | undefined): boolean => {
+    const discountPercent = Number(plan?.discountPercent || 0);
+    
+    if (!discountPercent) return false;
+    
+    if (plan?.discountExpiresAt) {
+      const expiryTime = new Date(plan.discountExpiresAt).getTime();
+      return Number.isFinite(expiryTime) && expiryTime > Date.now();
+    }
+    
+    return true;
+  };
+
+  /**
+   * Calculate the final price after discount
+   * SINGLE SOURCE OF TRUTH for all price calculations
+   * Uses Math.round for consistent rounding across the entire application
+   * 
+   * @param plan - The subscription plan object
+   * @returns The final price in pesos (minimum 1 peso)
+   */
+  const calculateFinalPrice = (plan: Plan | null | undefined): number => {
+    const basePrice = Number(plan?.price || 0);
+    
+    if (!isDiscountActive(plan)) {
+      return basePrice;
+    }
+    
+    const discountPercent = Number(plan.discountPercent || 0);
+    const discountMultiplier = 1 - (discountPercent / 100);
+    const discountedPrice = basePrice * discountMultiplier;
+    
+    // Use Math.round for consistent rounding everywhere
+    const finalPrice = Math.round(discountedPrice);
+    
+    // Ensure minimum price of 1 peso
+    return Math.max(finalPrice, 1);
+  };
+
   // Actions
   const fetchSubscription = async () => {
     isLoading.value = true;
@@ -121,17 +167,13 @@ export const useSubscriptionStore = defineStore("subscription", () => {
     }
   };
 
-  // Create a subscription QRPH payment (frontend will show QR and poll)
-  const isDiscountActive = (plan) => {
-    const pct = Number(plan?.discountPercent || 0);
-    if (pct <= 0) return false;
-
-    const exp = plan?.discountExpiresAt;
-    if (!exp) return true; // no expiry means always valid
-
-    return new Date(exp).getTime() > Date.now();
-  };
-
+  /**
+   * Create a subscription QRPH payment
+   * Frontend will show QR code and poll for payment status
+   * 
+   * @param planCode - The plan code to create payment for
+   * @returns Payment object with QR code URL and payment details
+   */
   const createSubscriptionPayment = async (planCode: string) => {
     isLoading.value = true;
     error.value = null;
@@ -140,20 +182,23 @@ export const useSubscriptionStore = defineStore("subscription", () => {
       const plan = plans.value.find((p) => p.code === planCode);
       if (!plan) throw new Error("Plan not found");
 
-      const discountAmount = Number((1 - (plan.discountPercent || 0) / 100).toFixed(2));
-
-
-      const disCountedPrice = () => {
-        return Math.ceil(((plan.price) * discountAmount)) >= 1 ? Math.ceil(((plan.price) * discountAmount)) : 1;
-      }
+      // Use the centralized price calculation function
+      const finalPricePesos = calculateFinalPrice(plan);
       
-      const amountCentavos = Math.round((isDiscountActive(plan) ? disCountedPrice() : plan.price) * 100);
+      // Convert to centavos for payment API (1 peso = 100 centavos)
+      const amountCentavos = finalPricePesos * 100;
+
       console.log(
-        "Creating subscription payment for plan",
+        "Creating subscription payment - Plan:",
         planCode,
-        "amountCentavos",
-        plan,
+        "| Final price:",
+        finalPricePesos,
+        "pesos |",
+        "Amount:",
+        amountCentavos,
+        "centavos"
       );
+
       const response = await axios.post(
         `${API_URL}/payments/subscription`,
         {
@@ -177,6 +222,14 @@ export const useSubscriptionStore = defineStore("subscription", () => {
     }
   };
 
+  /**
+   * Confirm subscription after successful payment
+   * Uses idempotency key to prevent double-execution
+   * 
+   * @param planCode - The plan code to activate
+   * @param paymentIntentId - The payment intent ID from successful payment
+   * @returns Updated subscription object
+   */
   const confirmSubscriptionWithPayment = async (
     planCode: string,
     paymentIntentId: string,
@@ -190,6 +243,7 @@ export const useSubscriptionStore = defineStore("subscription", () => {
         ...getAuthHeaders(),
         "Idempotency-Key": idempotencyKey,
       };
+      
       const response = await axios.post(
         `${API_URL}/sellers/subscription/start-or-change`,
         {
@@ -286,6 +340,10 @@ export const useSubscriptionStore = defineStore("subscription", () => {
     isSubscribed,
     currentPlan,
     daysUntilExpiry,
+
+    // Helper Functions (exposed for use in components)
+    isDiscountActive,
+    calculateFinalPrice,
 
     // Actions
     fetchSubscription,

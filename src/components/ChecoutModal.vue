@@ -8,6 +8,7 @@ import { useOrderStore } from "../stores/OrderStores";
 import { Alert } from "../components/composable/Alert.js";
 import { createQRPHPayment } from "../utils/paymentApi";
 import QRCodePaymentModal from "./QRCodePaymentModal.vue";
+import { useCheckoutAddressOverride } from "../composables/useCheckoutAddressOverride";
 
 import {
   UserIcon,
@@ -110,6 +111,12 @@ const customerAgreement = ref("");
 const isEditing = ref(false);
 const isSubmitting = ref(false);
 
+// Whether edited address should be saved to user profile when saving
+const saveToProfile = ref(false);
+
+// Checkout address override helper (transient localStorage persistence)
+const { get: getCheckoutAddressOverride, set: setCheckoutAddressOverride, clear: clearCheckoutAddressOverride } = useCheckoutAddressOverride();
+
 const shippingFee = ref<number | null>(0);
 
 const subtotal = computed(() => Number(cartStore.itemsSubtotal || 0));
@@ -181,6 +188,14 @@ const initializeUserData = async () => {
       customerName.value = user.name || "";
       phoneNumber.value = user.phone || "";
       setAddress(user.address);
+    }
+
+    // Prefer a transient checkout override if present
+    const override = getCheckoutAddressOverride();
+    if (override) {
+      setAddress(override);
+      // When using an override we default to not saving to profile
+      saveToProfile.value = false;
     }
 
     dataLoaded.value = true;
@@ -451,6 +466,8 @@ const removeVendorItemsFromCart = async (vendorId: string, items: SelectedItem[]
 
 const finalizeCheckoutSuccess = () => {
   clearCheckoutState();
+  // Clear transient override on successful checkout to avoid leaking address across sessions
+  clearCheckoutAddressOverride();
   Alert("Order(s) placed successfully — check your Orders page for details!");
   emit("close");
 };
@@ -475,6 +492,13 @@ async function submitOrder() {
   }
 
   isSubmitting.value = true;
+
+  // Ensure the current address is persisted as a transient override unless the user chose to save to profile
+  if (!saveToProfile.value) {
+    setCheckoutAddressOverride({ ...address });
+  } else {
+    clearCheckoutAddressOverride();
+  }
 
   try {
     const itemsByVendor = groupSelectedItemsByVendor(props.selectedItems);
@@ -503,8 +527,16 @@ const saveCustomerInfo = async () => {
   if (isEditing.value) {
     const userInfo = { address, name: customerName.value, phone: phoneNumber.value };
     try {
-      await userStore.updateUser(userInfo);
-      Alert("Profile updated");
+      if (saveToProfile.value) {
+        await userStore.updateUser(userInfo);
+        // If the user saved to profile, remove any transient override
+        clearCheckoutAddressOverride();
+        Alert("Profile updated");
+      } else {
+        // Persist a transient checkout-only override (does not touch profile)
+        setCheckoutAddressOverride({ ...address });
+        Alert("Address saved for this checkout only");
+      }
     } catch (err) {
       console.error("Failed to update user", err);
       Alert("Failed to save profile changes");
@@ -514,6 +546,13 @@ const saveCustomerInfo = async () => {
 };
 
 const handleClose = () => {
+  // Persist current address as a transient override if it looks valid and user didn't choose to save it to profile
+  if (isAddressValid.value && !saveToProfile.value) {
+    setCheckoutAddressOverride({ ...address });
+  } else if (saveToProfile.value) {
+    clearCheckoutAddressOverride();
+  }
+
   clearCheckoutState();
   emit("close");
 };
@@ -623,6 +662,14 @@ onMounted(async () => {
                   {{ key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, " $1") }}
                 </label>
               </div>
+
+              <div class="save-to-profile" v-if="isEditing">
+                <label class="checkbox-inline">
+                  <input type="checkbox" v-model="saveToProfile" />
+                  <span>Save this address to my profile</span>
+                </label>
+              </div>
+
               <p v-if="!isAddressValid" class="error">Please complete all address fields.</p>
             </div>
 

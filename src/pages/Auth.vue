@@ -798,7 +798,7 @@ select:focus {
   background: none;
   border: none;
   cursor: pointer;
-  color: #000000;
+  color: var(--text-primary);
   padding: 0;
 }
 
@@ -859,7 +859,7 @@ select:focus {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.9rem;
-  color: #303030;
+  color: var(--text-primary);
   margin-top: 0.25rem;
 }
 </style>

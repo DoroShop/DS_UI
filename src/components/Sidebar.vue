@@ -3,8 +3,8 @@ import { ref, defineEmits, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '../stores/authStores';
 import { useUserStore } from '../stores/userStores';
-import { useOrderStore } from '../stores/OrderStores';
 import { useTheme } from '../composables/useTheme';
+import { useOrderStore } from '../stores/OrderStores';
 import {
   HomeIcon,
   ChatBubbleLeftIcon,
@@ -30,15 +30,15 @@ const { isDark } = useTheme();
 
 // User info computed
 const userName = computed(() => {
-  return userStore.user?.fullName || userStore.user?.firstName || 'User';
+  return authStore.user?.name || userStore.user?.firstName || 'User';
 });
 
 const userEmail = computed(() => {
-  return userStore.user?.email || '';
+  return authStore.user?.email || '';
 });
 
 const userAvatar = computed(() => {
-  return userStore.user?.imageUrl || null;
+  return authStore.user?.imageUrl || null;
 });
 
 // Stats
@@ -98,8 +98,9 @@ const handleKeyDown = (event) => {
 };
 
 // Add/remove event listener for escape key
-onMounted(() => {
+onMounted(async() => {
   document.addEventListener('keydown', handleKeyDown);
+  await orderStore.fetchOrders();
 });
 
 onUnmounted(() => {
@@ -207,8 +208,8 @@ const confirmLogout = async () => {
         </div>
       </div>
       <div class="user-info">
-        <h3 class="user-name">{{ userName }}</h3>
-        <p class="user-email">{{ userEmail }}</p>
+        <h3 class="user-name" :title="userName">{{ userName }}</h3>
+        <p class="user-email" :title="userEmail">{{ userEmail }}</p>
       </div>
     </div>
 
@@ -352,6 +353,7 @@ const confirmLogout = async () => {
   font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
+  max-width: 14ch;
   margin: 0 0 2px 0;
   white-space: nowrap;
   overflow: hidden;

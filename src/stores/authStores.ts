@@ -1,4 +1,4 @@
-// src/stores/auth.js
+// src/stores/authStores.js
 import { defineStore } from "pinia";
 import axios from "axios";
 import { getAuthHeaders } from "../types/shared";
@@ -100,11 +100,14 @@ export const useAuthStore = defineStore("auth", {
             this.user = data.user || null;
             this.token = data.token;
             this.isAuthenticated = true;
-            this.userId = data.user.id
-            this.userRole = data.user.role
+            this.userId = data.user?.id || '';
+            this.userRole = data.user?.role || '';
           } else {
             this.token = null;
             this.isAuthenticated = false;
+            this.user = null;
+            this.userId = '';
+            this.userRole = '';
           }
           this.authChecked = true;
           return this.isAuthenticated;
@@ -113,6 +116,9 @@ export const useAuthStore = defineStore("auth", {
           console.error("fetchSession error:", err);
           this.token = null;
           this.isAuthenticated = false;
+          this.user = null;
+          this.userId = '';
+          this.userRole = '';
           this.error = err;
           this.authChecked = true;
           return false;
@@ -125,9 +131,30 @@ export const useAuthStore = defineStore("auth", {
       return this._sessionPromise;
     },
 
+    /**
+     * Get the default redirect path based on user role
+     * @returns {string} The path to redirect to
+     */
+    getRoleBasedRedirect() {
+      if (!this.user?.role) {
+        return '/products';
+      }
+
+      switch (this.user.role) {
+        case 'admin':
+          return '/admin';
+        case 'vendor':
+          return '/vendor/dashboard';
+        case 'customer':
+        default:
+          return '/products';
+      }
+    },
+
     async loginUser(email: string, password: string) {
-      this.loading = true
-      this.loginError = null
+      this.loading = true;
+      this.loginError = null;
+      
       try {
         const response = await axios.post(
           `${API_BASE_URL}/user/login`,
@@ -137,23 +164,32 @@ export const useAuthStore = defineStore("auth", {
           }
         );
 
-        console.log(response)
-        this.loading = false
-        if (response.statusText === 'OK') {
+        console.log('Login response:', response);
+        
+        if (response.statusText === 'OK' || response.status === 200) {
+          // Fetch session to get user data and role
+          await this.fetchSession(true);
+          
           // Fetch CSRF token after successful login
           await this.fetchCsrfToken();
-          window.location.assign("/products")
+          
+          // Get role-based redirect path
+          const redirectPath = this.getRoleBasedRedirect();
+          
+          console.log('Redirecting to:', redirectPath, 'for role:', this.user?.role);
+          
+          // Redirect based on user role
+          window.location.assign(redirectPath);
         }
 
         return response.data;
       } catch (error: any) {
-        this.loginError = 'User Not Found, Please check your email or password!'
-
+        this.loginError = 'User Not Found, Please check your email or password!';
         const message =
           error.response?.data?.error || "Login failed. Please try again.";
         throw new Error(message);
       } finally {
-        this.loading = false
+        this.loading = false;
       }
     },
 
@@ -212,6 +248,14 @@ export const useAuthStore = defineStore("auth", {
       this.loginError = null;
       this.registerError = null;
       this.verifyError = null;
+      this.csrfToken = null;
+      
+      // Clear transient checkout override (privacy)
+      try {
+        localStorage.removeItem('checkoutAddressOverride');
+      } catch (e) {
+        console.warn('Failed to clear checkout override during logout', e);
+      }
       
       console.log('✨ Auth store logout completed');
     },
@@ -252,28 +296,28 @@ export const useAuthStore = defineStore("auth", {
 
     // send otp
     async requestOtp(email: string) {
-      this.registerError = null
-      this.loading = true
+      this.registerError = null;
+      this.loading = true;
       
       try {
         const res = await axios.post(`${API_BASE_URL}/user/request-otp`, { email }, {
           headers: { "Content-Type": "application/json" },
         });
-        console.log('OTP request successful:', res.data)
+        console.log('OTP request successful:', res.data);
         return res.data;
       } catch (err: any) {
         console.error('OTP request failed:', err);
         this.registerError = err.response?.data?.message || err.response?.data?.error || 'Failed to send OTP. Please try again.';
         throw err;
       } finally {
-        this.loading = false
+        this.loading = false;
       }
     },
 
     async verifyAndRegister(userData: any) {
-      this.verifyError = null
-      this.registerError = null
-      this.loading = true
+      this.verifyError = null;
+      this.registerError = null;
+      this.loading = true;
       
       try {
         const res = await axios.post(`${API_BASE_URL}/user/register`,
@@ -282,6 +326,13 @@ export const useAuthStore = defineStore("auth", {
             headers: { "Content-Type": "application/json" },
           });
         console.log('Registration successful:', res.data);
+        
+        // After successful registration, login automatically if credentials are available
+        if (userData.email && userData.password) {
+          console.log('Auto-logging in after registration...');
+          await this.loginUser(userData.email, userData.password);
+        }
+        
         return res.data;
       } catch (err: any) {
         console.error('Registration failed:', err);
@@ -289,9 +340,8 @@ export const useAuthStore = defineStore("auth", {
         this.registerError = this.verifyError;
         throw err;
       } finally {
-        this.loading = false
+        this.loading = false;
       }
     }
-
   },
 });

@@ -51,55 +51,89 @@ const AdminSubscriptions = () =>
   import("../views/admin/AdminSubscriptions.vue");
 
 const routes = [
-  { path: "/", redirect: "/products" },
-  { path: "/products", component: Home },
+  { 
+    path: "/", 
+    name: "Root",
+    redirect: () => {
+      // This redirect will be handled by the beforeEach guard
+      // for role-based redirection
+      return "/products";
+    }
+  },
+  { 
+    path: "/products", 
+    name: "Products",
+    component: Home 
+  },
 
   {
     path: "/signup",
+    name: "Signup",
     component: AuthPage,
-    meta: { public: true, authPage: true,  hideMobileNav: true },
+    meta: { public: true, authPage: true, hideMobileNav: true },
   },
   {
     path: "/login",
+    name: "Login",
     component: AuthPage,
     meta: { public: true, authPage: true, hideMobileNav: true },
   },
 
-  // User
-  { path: "/user/me", component: Profile, meta: { requiresAuth: true } },
+  // User Routes
+  { 
+    path: "/user/me", 
+    name: "Profile",
+    component: Profile, 
+    meta: { requiresAuth: true } 
+  },
   {
     path: "/messages",
+    name: "Messages",
     component: CustomerMessages,
-    meta: { requiresAuth: true, hideMobileNav: true },
+    meta: { hideMobileNav: true },
   },
   {
     path: "/message/:chatId",
+    name: "ChatView",
     component: ChatView,
-    meta: { requiresAuth: true },
+    // meta: { requiresAuth: true },
   },
-  { path: "/cart", component: Cart, meta: { requiresAuth: true } },
-  { path: "/orders", component: Orders, meta: { requiresAuth: true } },
+  { 
+    path: "/cart", 
+    name: "Cart",
+    component: Cart, 
+    // meta: { requiresAuth: true } 
+  },
+  { 
+    path: "/orders", 
+    name: "Orders",
+    component: Orders, 
+    // meta: { requiresAuth: true } 
+  },
   {
     path: "/products/search",
+    name: "Search",
     component: Search,
-    meta: { requiresAuth: true, hideMobileNav: true },
+    meta: {hideMobileNav: true },
   },
   {
     path: "/search/result",
+    name: "SearchResult",
     component: ProductSearchResult,
-    meta: { requiresAuth: true, hideMobileNav: true },
+    // meta: { requiresAuth: true, hideMobileNav: true },
   },
   {
     path: "/product/:id",
+    name: "ViewProduct",
     component: ViewProduct,
-    meta: { requiresAuth: true, hideMobileNav: true },
+    meta: {  hideMobileNav: true },
   },
   {
     path: "/view/vendor/:id",
+    name: "ViewVendor",
     component: ViewSeller,
-    meta: { requiresAuth: true, hideMobileNav: true },
+    meta: {hideMobileNav: true },
   },
-
   {
     path: "/shops/nearby",
     name: "NearbyShops",
@@ -107,17 +141,18 @@ const routes = [
     meta: { requiresAuth: true, hideMobileNav: true },
   },
 
-  // Vendor
+  // Vendor Routes
   {
     path: "/vendor/dashboard",
+    name: "VendorDashboard",
     component: Dashboard,
-    meta: { requiresAuth: true, hideMobileNav: true },
+    meta: { requiresAuth: true, requiresVendor: true, hideMobileNav: true },
   },
   {
     path: "/vendor/commissions",
     name: "VendorCommissions",
     component: VendorCommissions,
-    meta: { requiresAuth: true, hideMobileNav: true },
+    meta: { requiresAuth: true, requiresVendor: true, hideMobileNav: true },
   },
 
   // Notifications
@@ -128,46 +163,120 @@ const routes = [
     meta: { requiresAuth: true },
   },
 
-  // Admin
+  // Admin Routes
   {
     path: "/admin",
+    name: "Admin",
     component: AdminLayout,
     meta: { requiresAuth: true, requiresAdmin: true, hideMobileNav: true },
     children: [
-      { path: "", component: AdminDashboard },
-      { path: "dashboard", component: AdminDashboard },
-      { path: "users", component: AdminUsers },
-      { path: "products", component: AdminProducts },
+      { 
+        path: "", 
+        name: "AdminDashboard",
+        component: AdminDashboard 
+      },
+      { 
+        path: "dashboard", 
+        redirect: { name: "AdminDashboard" }
+      },
+      { 
+        path: "users", 
+        name: "AdminUsers",
+        component: AdminUsers 
+      },
+      { 
+        path: "products", 
+        name: "AdminProducts",
+        component: AdminProducts 
+      },
       {
         path: "products/pending",
+        name: "AdminProductsPending",
         component: AdminProducts,
         props: { initialStatus: "pending_review" },
       },
-      { path: "sellers", component: AdminSellers },
+      { 
+        path: "sellers", 
+        name: "AdminSellers",
+        component: AdminSellers 
+      },
       {
         path: "sellers/applications",
+        name: "AdminSellersApplications",
         component: AdminSellers,
         props: { showApplications: true },
       },
-      { path: "orders", component: AdminOrders },
-      { path: "commission", component: AdminCommission },
-      { path: "cod-commissions", component: AdminCODCommissions },
-      { path: "pending-sellers", component: AdminPendingSellers },
-      { path: "categories", component: AdminCategories },
-      { path: "municipalities", component: AdminMunicipalities },
-      { path: "banners", component: AdminBanners },
-      { path: "announcements", component: AdminAnnouncements },
-      { path: "refunds", component: AdminRefunds },
+      { 
+        path: "orders", 
+        name: "AdminOrders",
+        component: AdminOrders 
+      },
+      { 
+        path: "commission", 
+        name: "AdminCommission",
+        component: AdminCommission 
+      },
+      { 
+        path: "cod-commissions", 
+        name: "AdminCODCommissions",
+        component: AdminCODCommissions 
+      },
+      { 
+        path: "pending-sellers", 
+        name: "AdminPendingSellers",
+        component: AdminPendingSellers 
+      },
+      { 
+        path: "categories", 
+        name: "AdminCategories",
+        component: AdminCategories 
+      },
+      { 
+        path: "municipalities", 
+        name: "AdminMunicipalities",
+        component: AdminMunicipalities 
+      },
+      { 
+        path: "banners", 
+        name: "AdminBanners",
+        component: AdminBanners 
+      },
+      { 
+        path: "announcements", 
+        name: "AdminAnnouncements",
+        component: AdminAnnouncements 
+      },
+      { 
+        path: "refunds", 
+        name: "AdminRefunds",
+        component: AdminRefunds 
+      },
       {
         path: "withdrawals/history",
         name: "AdminWithdrawalsHistory",
         component: AdminWithdrawals,
         props: { initialTab: "history" },
       },
-      { path: "withdrawals", component: AdminWithdrawals },
-      { path: "subscriptions", component: AdminSubscriptions },
-      { path: "audit-logs", component: AdminAuditLogs },
-      { path: "settings", component: AdminSettings },
+      { 
+        path: "withdrawals", 
+        name: "AdminWithdrawals",
+        component: AdminWithdrawals 
+      },
+      { 
+        path: "subscriptions", 
+        name: "AdminSubscriptions",
+        component: AdminSubscriptions 
+      },
+      { 
+        path: "audit-logs", 
+        name: "AdminAuditLogs",
+        component: AdminAuditLogs 
+      },
+      { 
+        path: "settings", 
+        name: "AdminSettings",
+        component: AdminSettings 
+      },
     ],
   },
 ];
@@ -194,34 +303,105 @@ const router = createRouter({
   },
 });
 
+/**
+ * Get role-based redirect path
+ * @param {Object} user - User object with role property
+ * @returns {string} Redirect path
+ */
+const getRoleBasedPath = (user) => {
+  if (!user?.role) return "/products";
+  
+  switch (user.role) {
+    case "admin":
+      return "/admin";
+    case "vendor":
+      return "/vendor/dashboard";
+    case "customer":
+    default:
+      return "/products";
+  }
+};
+
 router.beforeEach(async (to, from, next) => {
   const auth = useAuthStore();
 
+  console.log("🔄 Navigation:", {
+    from: from.path,
+    to: to.path,
+    authenticated: auth.isAuthenticated,
+    role: auth.user?.role,
+    authChecked: auth.authChecked
+  });
+
+  // Wait for auth check to complete
   if (!auth.authChecked) {
+    console.log("⏳ Checking authentication...");
     await auth.fetchSession();
   }
 
+  // Handle authenticated users accessing auth pages (login/signup)
   if (to.meta.authPage && auth.isAuthenticated) {
-    return next("/");
+    const redirectPath = getRoleBasedPath(auth.user);
+    console.log("✅ Authenticated user on auth page, redirecting to:", redirectPath);
+    return next(redirectPath);
   }
 
+  // Handle root path "/" - redirect based on role
+  if (to.path === "/" && auth.isAuthenticated) {
+    const redirectPath = getRoleBasedPath(auth.user);
+    console.log("🏠 Root path redirect for authenticated user:", redirectPath);
+    return next(redirectPath);
+  }
+
+  // Allow public routes
   if (to.meta.public || !to.meta.requiresAuth) {
+    console.log("🌐 Public route, allowing access");
     return next();
   }
 
+  // Require authentication for protected routes
   if (!auth.isAuthenticated) {
-    return next("/signup");
+    console.log("🔒 Protected route requires authentication, redirecting to login");
+    return next("/login");
   }
 
-  if (to.path.startsWith("/vendor") && auth.user?.role !== "vendor") {
-    return next("/");
+  // Protect vendor routes
+  if (to.meta.requiresVendor) {
+    if (auth.user?.role !== "vendor") {
+      const redirectPath = getRoleBasedPath(auth.user);
+      console.log("⛔ Vendor route access denied, redirecting to:", redirectPath);
+      return next(redirectPath);
+    }
+    console.log("✅ Vendor access granted");
   }
 
-  if (to.meta.requiresAdmin && auth.user?.role !== "admin") {
-    return next("/");
+  // Protect admin routes
+  if (to.meta.requiresAdmin) {
+    if (auth.user?.role !== "admin") {
+      const redirectPath = getRoleBasedPath(auth.user);
+      console.log("⛔ Admin route access denied, redirecting to:", redirectPath);
+      return next(redirectPath);
+    }
+    console.log("✅ Admin access granted");
   }
 
+  // Legacy protection - catch any vendor paths without proper meta
+  if (to.path.startsWith("/vendor") && !to.meta.requiresVendor) {
+    if (auth.user?.role !== "vendor") {
+      const redirectPath = getRoleBasedPath(auth.user);
+      console.log("⚠️ Legacy vendor path protection, redirecting to:", redirectPath);
+      return next(redirectPath);
+    }
+  }
+
+  // Allow navigation
+  console.log("✅ Navigation allowed");
   next();
+});
+
+// Optional: Add navigation error handler
+router.onError((error) => {
+  console.error("❌ Router error:", error);
 });
 
 export default router;

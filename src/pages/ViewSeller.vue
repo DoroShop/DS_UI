@@ -127,7 +127,7 @@
 
 	// Calculate seller rating from reviews or use fallback
 	const calculatedRating = computed(() => {
-		if (seller.value?.rating) return seller.value.rating;
+		if (seller.value?.rating) return seller.value.rating / seller.value.numRatings;
 		return 0;
 
 	});
@@ -603,7 +603,7 @@
 							<div class="quick-stat">
 								<StarSolidIcon class="stat-icon gold" />
 								<span class="stat-value">{{
-									(calculatedRating / (totalReviews || 1)).toFixed(1)
+									calculatedRating.toFixed(1)
 								}}</span>
 									<span class="stat-label">Ratings</span>
 							</div>

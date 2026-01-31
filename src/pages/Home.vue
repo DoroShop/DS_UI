@@ -48,7 +48,7 @@ const trackScrollPosition = () => {
 const handleScroll = () => {
   if (scrollTimeout) clearTimeout(scrollTimeout)
   scrollTimeout = setTimeout(() => {
-    if (targetSection.value) {
+    if (targetSection.value) {``
       targetSection.value.scrollIntoView({
         behavior: "smooth",
         block: "start"

@@ -48,10 +48,141 @@ const selectedOption = ref<ProductOption | null>(null);
 const currentImageIndex = ref(0);
 const isWishlisted = ref(false);
 const quantity = ref(1);
-const activeTab = ref<'description' | 'reviews'>('reviews');
+const activeTab = ref<'description' | 'reviews'>('description');
 const showOptions = ref(false);
 const showOptionsModal = ref(false);
-let imageSlideInterval: number | null = null;
+
+// ============================================
+// IMAGE SLIDER - BULLETPROOF IMPLEMENTATION
+// ============================================
+class ImageSlider {
+  private intervalId: number | null = null;
+  private timeoutId: number | null = null;
+  private isActive: boolean = false;
+  private isTransitioning: boolean = false;
+  private userInteracting: boolean = false;
+  
+  private readonly SLIDE_INTERVAL = 3000; // 3 seconds - FIXED
+  private readonly USER_DELAY = 5000; // 5 seconds after user interaction
+  
+  constructor() {
+    console.log('🎬 ImageSlider initialized');
+  }
+  
+  /**
+   * Start the automatic slideshow
+   * GUARANTEED to only have ONE interval running
+   */
+  start(images: string[], currentIndex: number, onSlide: (nextIndex: number) => void): void {
+    // CRITICAL: Always stop first
+    this.stop();
+    
+    // Validate
+    if (!images || images.length <= 1) {
+      console.log('⏭️ Not starting - need 2+ images');
+      return;
+    }
+    
+    if (this.userInteracting) {
+      console.log('⏭️ Not starting - user is interacting');
+      return;
+    }
+    
+    if (this.isActive) {
+      console.log('⚠️ Already active - this should never happen');
+      return;
+    }
+    
+    console.log('▶️ Starting slideshow - interval:', this.SLIDE_INTERVAL);
+    this.isActive = true;
+    
+    // Create interval with FIXED timing
+    this.intervalId = window.setInterval(() => {
+      // Safety checks inside interval
+      if (this.userInteracting || this.isTransitioning) {
+        return; // Skip this cycle
+      }
+      
+      const nextIndex = (currentIndex + 1) % images.length;
+      console.log('🎬 Auto-slide:', currentIndex, '→', nextIndex);
+      onSlide(nextIndex);
+      currentIndex = nextIndex; // Update for next iteration
+    }, this.SLIDE_INTERVAL);
+  }
+  
+  /**
+   * Stop the slideshow completely
+   * GUARANTEED to clear all timers
+   */
+  stop(): void {
+    if (this.intervalId !== null) {
+      console.log('⏹️ Stopping slideshow');
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+    
+    if (this.timeoutId !== null) {
+      console.log('⏹️ Clearing restart timeout');
+      clearTimeout(this.timeoutId);
+      this.timeoutId = null;
+    }
+    
+    this.isActive = false;
+    this.userInteracting = false;
+  }
+  
+  /**
+   * Pause slideshow temporarily for user interaction
+   * Will auto-resume after delay
+   */
+  pauseForUserInteraction(images: string[], currentIndex: number, onSlide: (nextIndex: number) => void): void {
+    console.log('👆 User interaction - pausing slideshow');
+    
+    // Stop everything
+    this.stop();
+    
+    // Mark as user interacting
+    this.userInteracting = true;
+    
+    // Schedule restart
+    this.timeoutId = window.setTimeout(() => {
+      console.log('⏰ User interaction timeout - resuming slideshow');
+      this.userInteracting = false;
+      this.start(images, currentIndex, onSlide);
+    }, this.USER_DELAY);
+  }
+  
+  /**
+   * Set transition state
+   */
+  setTransitioning(value: boolean): void {
+    this.isTransitioning = value;
+  }
+  
+  /**
+   * Get current state
+   */
+  getState() {
+    return {
+      isActive: this.isActive,
+      userInteracting: this.userInteracting,
+      isTransitioning: this.isTransitioning,
+      hasInterval: this.intervalId !== null,
+      hasTimeout: this.timeoutId !== null
+    };
+  }
+  
+  /**
+   * Complete cleanup
+   */
+  destroy(): void {
+    console.log('🧹 Destroying ImageSlider');
+    this.stop();
+  }
+}
+
+// Create slider instance
+const imageSlider = new ImageSlider();
 
 // Review state
 const sortBy = ref<'createdAt' | 'rating' | 'helpful'>('createdAt');
@@ -60,7 +191,6 @@ const currentReviewPage = ref(1);
 // Track current product ID (reactive for route changes)
 const productId = computed(() => {
   const id = route.params.id;
-  console.log('ViewProduct productId computed - route.params.id:', id, 'Type:', typeof id, 'Route path:', route.path);
   return String(id);
 });
 let loadedProductId = ''; // Track which product is currently loaded
@@ -75,7 +205,6 @@ const calculatedRating = computed(() => {
   if (stats && stats.averageRating) {
     return Number(stats.averageRating).toFixed(1);
   }
-  // Fallback to product rating
   return product.value?.averageRating?.toFixed(1) || '0.0';
 });
 
@@ -97,20 +226,16 @@ const sanitizedDescription = computed(() => {
   return product.value?.description || '';
 });
 
-
 const productStock = computed(() => {
-  // product may be undefined while fetching; option may be undefined for simple products
   const prod = product?.value;
   if (!prod) return 0;
 
-  // If product has options, sum their stock (safely handle missing stock values)
   if (Array.isArray(prod.option) && prod.option.length > 0) {
     return prod.option.reduce((total: number, option: any) => {
       return total + (option?.stock ?? 0);
     }, 0);
   }
 
-  // Fallback to product.stock when no options exist
   return prod.stock ?? 0;
 });
 
@@ -167,15 +292,12 @@ const addToCart = async () => {
     return;
   }
 
-  // Always show modal for option selection when there are options
   showOptionsModal.value = true;
 };
 
 const toggleWishlist = () => {
   isWishlisted.value = !isWishlisted.value;
-  // TODO: Implement wishlist functionality
 };
-
 
 // Load product data
 function createDeferred() {
@@ -190,41 +312,36 @@ function createDeferred() {
 const pendingLoads = new Map<string, Promise<void>>();
 
 const loadProductData = async (id: string) => {
-  // Check if we're actually on a product route
   if (!route.path.startsWith('/product/')) {
-    console.log('ViewProduct: Not on product route, skipping load. Route:', route.path);
     return;
   }
 
-  // Validate ID before proceeding
-  console.log('loadProductData called with ID:', id, 'Type:', typeof id, 'Current route:', route.path);
   if (!id || id === 'undefined' || id === 'null') {
-    console.warn('ViewProduct: Invalid product ID - ID:', id, 'Route params:', route.params, 'Route path:', route.path);
+    console.warn('ViewProduct: Invalid product ID');
     return;
   }
 
-  // Fast path: already loaded and shown
+  // Fast path: already loaded
   if (loadedProductId === id && product.value?._id === id) {
     if (product.value?.imageUrls?.length > 0) {
       selectedImage.value = product.value.imageUrls[0];
+      currentImageIndex.value = 0;
       startImageSlideshow();
     }
     return;
   }
 
-  // If another load for the same id is in-flight, wait for it instead of issuing a duplicate request
   if (pendingLoads.has(id)) {
-    console.log('ViewProduct: waiting for existing load for', id);
     try {
       await pendingLoads.get(id);
     } catch (err) {
-      console.error('ViewProduct: previous load failed for', id, err);
-      return; // avoid retry storms; caller can try again
+      console.error('Previous load failed:', err);
+      return;
     }
 
-    // Ensure UI state is restored after awaited load
     if (product.value?.imageUrls && product.value.imageUrls.length > 0) {
       selectedImage.value = product.value.imageUrls[0];
+      currentImageIndex.value = 0;
       startImageSlideshow();
     }
 
@@ -237,23 +354,24 @@ const loadProductData = async (id: string) => {
 
   isLoading.value = true;
   let loadError: any = null;
+  
   try {
-    // Clear previous product data first
+    // CRITICAL: Stop slideshow before loading
+    imageSlider.stop();
+    
+    // Clear state
     productStore.productById = {} as any;
     productStore.relatedProducts = [];
+    selectedImage.value = "";
+    currentImageIndex.value = 0;
 
-    // Load product data first (priority)
     await productStore.fetchProductsById(id);
-
-    // Show product immediately
     isLoading.value = false;
 
-    // Load related products in background
     productStore.fetchRelatedProducts(id).catch(err => {
       console.error('Failed to load related products:', err);
     });
 
-    // Load reviews asynchronously (non-blocking)
     isLoadingReviews.value = true;
     Promise.all([
       reviewStore.fetchProductReviews(id, 1, sortBy.value),
@@ -266,6 +384,7 @@ const loadProductData = async (id: string) => {
 
     if (product.value?.imageUrls && product.value?.imageUrls?.length > 0) {
       selectedImage.value = product.value.imageUrls[0];
+      currentImageIndex.value = 0;
       startImageSlideshow();
     }
     loadedProductId = id;
@@ -286,61 +405,55 @@ const loadProductData = async (id: string) => {
 };
 
 onMounted(async () => {
-  // Check if we're actually on a product route
   if (!route.path.startsWith('/product/')) {
-    console.log('ViewProduct onMounted: Not on product route, skipping load. Route:', route.path);
     return;
   }
 
-  console.log('ViewProduct onMounted - productId:', productId.value, 'Route:', route.path);
-  // Give a small delay to ensure route is fully loaded
   await new Promise(resolve => setTimeout(resolve, 10));
-  console.log('After delay - productId:', productId.value, 'Route params:', route.params);
   await loadProductData(productId.value);
 });
 
 onUnmounted(() => {
-  stopImageSlideshow();
+  console.log('🧹 Component unmounting');
+  imageSlider.destroy();
   reviewStore.clearProductReviews();
 });
 
-// 🔄 Keep-alive lifecycle hooks
 onActivated(async () => {
-  // Check if we're actually on a product route
   if (!route.path.startsWith('/product/')) {
-    console.log('ViewProduct onActivated: Not on product route, skipping. Route:', route.path);
     return;
   }
 
-  // Ensure we have a valid product ID before proceeding
-  console.log('onActivated called - productId:', productId.value, 'loadedProductId:', loadedProductId, 'Route:', route.path);
   if (!productId.value || productId.value === 'undefined' || productId.value === 'null') {
-    console.warn('ViewProduct onActivated: Invalid productId detected - ID:', productId.value, 'Route params:', route.params, 'Route path:', route.path);
     return;
   }
 
-  // Check if we need to load a different product
   if (productId.value !== loadedProductId) {
-    savedScrollPosition = 0; // Reset scroll for new product
+    savedScrollPosition = 0;
     await loadProductData(productId.value);
-  } else if (savedScrollPosition > 0) {
-    // Same product, restore scroll position
-    setTimeout(() => {
-      window.scrollTo(0, savedScrollPosition);
-    }, 0);
+  } else {
+    if (product.value?.imageUrls && product.value.imageUrls.length > 1) {
+      startImageSlideshow();
+    }
+    
+    if (savedScrollPosition > 0) {
+      setTimeout(() => {
+        window.scrollTo(0, savedScrollPosition);
+      }, 0);
+    }
   }
 });
 
 onDeactivated(() => {
-  // Save scroll position when component is deactivated
+  console.log('⏸️ Component deactivated');
   savedScrollPosition = window.scrollY;
+  imageSlider.stop();
 });
 
-// Watch for route param changes (for related products navigation)
+// Watch for route param changes
 watch(productId, async (newId, oldId) => {
   if (newId && newId !== oldId && newId !== loadedProductId) {
     savedScrollPosition = 0;
-    // Scroll the container element to top (it has overflow:auto)
     const container = document.querySelector('.product-details-page');
     if (container) {
       container.scrollTo(0, 0);
@@ -350,51 +463,74 @@ watch(productId, async (newId, oldId) => {
   }
 });
 
-// Smooth image transition
+/**
+ * Smooth image transition
+ */
 const transitionToImage = (image: string, index: number) => {
-  if (isImageTransitioning.value) return;
+  if (isImageTransitioning.value) {
+    return;
+  }
 
+  imageSlider.setTransitioning(true);
   isImageTransitioning.value = true;
   currentImageIndex.value = index;
 
-  // Small delay for fade effect
   setTimeout(() => {
     selectedImage.value = image;
     setTimeout(() => {
       isImageTransitioning.value = false;
+      imageSlider.setTransitioning(false);
     }, 300);
   }, 50);
 };
 
+/**
+ * Start slideshow using the ImageSlider class
+ */
 const startImageSlideshow = () => {
-  if (product.value?.imageUrls && product.value.imageUrls.length > 1) {
-    imageSlideInterval = setInterval(() => {
-      const nextIndex = (currentImageIndex.value + 1) % product.value.imageUrls.length;
-      transitionToImage(product.value.imageUrls[nextIndex], nextIndex);
-    }, 4000); // Change image every 4 seconds
+  if (!product.value?.imageUrls || product.value.imageUrls.length <= 1) {
+    return;
   }
+  
+  console.log('🎬 Starting slideshow wrapper');
+  
+  imageSlider.start(
+    product.value.imageUrls,
+    currentImageIndex.value,
+    (nextIndex) => {
+      if (product.value?.imageUrls) {
+        transitionToImage(product.value.imageUrls[nextIndex], nextIndex);
+      }
+    }
+  );
 };
 
-const stopImageSlideshow = () => {
-  if (imageSlideInterval) {
-    clearInterval(imageSlideInterval);
-    imageSlideInterval = null;
-  }
-};
-
+/**
+ * Handle manual image selection
+ */
 const selectImageManually = (image: string, index: number) => {
-  stopImageSlideshow(); // Stop auto-slide when user manually selects
+  console.log('👆 User selected image:', index);
+  
+  // Transition immediately
   transitionToImage(image, index);
-
-  // Restart auto-slide after 5 seconds of inactivity
-  setTimeout(() => {
-    startImageSlideshow();
-  }, 5000);
+  
+  // Pause slideshow and schedule restart
+  if (product.value?.imageUrls && product.value.imageUrls.length > 1) {
+    imageSlider.pauseForUserInteraction(
+      product.value.imageUrls,
+      index,
+      (nextIndex) => {
+        if (product.value?.imageUrls) {
+          transitionToImage(product.value.imageUrls[nextIndex], nextIndex);
+        }
+      }
+    );
+  }
 };
 
 const selectOption = (option: ProductOption) => {
   selectedOption.value = option;
-  quantity.value = 1; // Reset quantity on option change
+  quantity.value = 1;
   if (option.imageUrl) {
     selectedImage.value = option.imageUrl;
   }
@@ -402,7 +538,7 @@ const selectOption = (option: ProductOption) => {
 
 const closeOptionsModal = () => {
   showOptionsModal.value = false;
-  selectedOption.value = null; // Reset selection when modal is closed
+  selectedOption.value = null;
 };
 
 const confirmAddToCart = async () => {
@@ -410,13 +546,12 @@ const confirmAddToCart = async () => {
 
   await productStore.addToCart(selectedOption.value._id, productStore.productId, quantity.value);
   showOptionsModal.value = false;
-  selectedOption.value = null; // Reset selection for next time
+  selectedOption.value = null;
 };
 
 const handleImageError = (event: Event) => {
   const target = event.target as HTMLImageElement;
-  target.src =
-    "https://images.pexels.com/photos/90946/pexels-photo-90946.jpeg?auto=compress&cs=tinysrgb&w=400";
+  target.src = "https://images.pexels.com/photos/90946/pexels-photo-90946.jpeg?auto=compress&cs=tinysrgb&w=400";
 };
 
 const formatNumber = (num: number) => {
@@ -486,6 +621,7 @@ const getUserAvatar = (user: any) => {
 };
 
 </script>
+
 
 <template>
   <div class="product-details-page">
@@ -681,17 +817,23 @@ const getUserAvatar = (user: any) => {
       <div class="product-details-tabs">
         <!-- Tab Navigation -->
         <div class="tab-navigation">
+          <button :class="['tab-button', { active: activeTab === 'description' }]" @click="activeTab = 'description'">
+            <span class="tab-label">Description</span>
+          </button>
           <button :class="['tab-button', { active: activeTab === 'reviews' }]" @click="activeTab = 'reviews'">
             <span class="tab-label">Reviews</span>
             <span v-if="totalReviews > 0" class="tab-count">({{ totalReviews }})</span>
-          </button>
-          <button :class="['tab-button', { active: activeTab === 'description' }]" @click="activeTab = 'description'">
-            <span class="tab-label">Description</span>
           </button>
         </div>
 
         <!-- Tab Content -->
         <div class="tab-content">
+          <!-- Description Tab -->
+          <div :class="['tab-pane description-pane', { active: activeTab === 'description' }]">
+            <div class="description-content" v-html="sanitizedDescription"></div>
+            <p v-if="!sanitizedDescription" class="no-description">No description available.</p>
+          </div>
+
           <!-- Reviews Tab -->
           <div :class="['tab-pane reviews-pane', { active: activeTab === 'reviews' }]">
             <!-- Review Loading State -->
@@ -792,12 +934,6 @@ const getUserAvatar = (user: any) => {
               <h3>No reviews yet</h3>
               <p>Be the first to review this product!</p>
             </div>
-          </div>
-
-          <!-- Description Tab -->
-          <div :class="['tab-pane description-pane', { active: activeTab === 'description' }]">
-            <div class="description-content" v-html="sanitizedDescription"></div>
-            <p v-if="!sanitizedDescription" class="no-description">No description available.</p>
           </div>
         </div>
       </div>

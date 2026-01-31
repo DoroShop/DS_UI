@@ -1,6 +1,7 @@
 <script setup lang="js">
 import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue';
 import { useRouter } from 'vue-router';
+import {useAuthStore} from '../stores/authStores';
 import Sidebar from "./Sidebar.vue"
 import Wallet from "./Wallet.vue"
 // import OrderTrackerModal from "./OrderTrackerModal.vue"
@@ -21,6 +22,11 @@ import { useCartStore } from '../stores/cartStores';
 import { useOrderStore } from '../stores/OrderStores';
 import { useMessageStore } from '../stores/messageStore';
 import { useTheme } from '../composables/useTheme';
+
+
+const authStore = useAuthStore();   
+
+const userName = authStore.user?.name || 'Guest';
 
 const router = useRouter();
 const cartStore = useCartStore();
@@ -92,21 +98,27 @@ const openAccountInfo = async () => {
     isAccountOpen.value = !isAccountOpen.value;
 };
 
+const goToLoginPage = async () => {
+    router.push("/login")
+};
+
+
 function onFocus() {
     router.push("/products/search")
 }
 const totalItems = computed(() => cartStore.Count);
 onMounted(async () => {
-    await cartStore.fetchCart();
-    await orderStore.fetchOrders();
+    // await cartStore.fetchCart();
+    // await orderStore.fetchOrders();
+    console.log("userrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr", authStore.user)
     cartStore.itemCount()
     window.addEventListener('resize', handleResize);
     document.addEventListener('click', handleClickOutside);
-});
+}); 
 
 onBeforeUnmount(() => {
     window.removeEventListener('resize', handleResize);
-    document.addEventListener('click', handleClickOutside);
+    document.removeEventListener('click', handleClickOutside);
 });
 
 const openWallet = () => {
@@ -155,10 +167,10 @@ const goToCart = () => {
             <div class="desktop-search">
                 <div class="search-container">
                     <input @focus="onFocus" type="text" placeholder="Search products..." class="search-input" />
-                    <button class="search-button">
+                    <!-- <button class="search-button">
                         <span class="search-text">Search</span>
                         <MagnifyingGlassIcon class="search-icon" />
-                    </button>
+                    </button> -->
                 </div>
             </div>
 
@@ -188,9 +200,13 @@ const goToCart = () => {
                     </button>
                     <NotificationBell />
                 </div>
-                <button ref="openButtonRef" @click="openAccountInfo" class="account-button">
+                <button ref="openButtonRef" v-if="authStore.isAuthenticated" @click="openAccountInfo" class="account-button">
                     <UserIcon class="account-icon" />
-                    <span class="account-text">Account</span>
+                    <span class="account-text">{{ userName }}</span>
+                </button>
+                  <button ref="openButtonRef" v-else @click="goToLoginPage" class="account-button">
+                    <UserIcon class="account-icon" />
+                    <span class="account-text">Sign in</span>
                 </button>
             </div>
 
@@ -276,11 +292,9 @@ const goToCart = () => {
     font-weight: 700;
     color: var(--text-white);
     white-space: nowrap;
+    margin-top: 8px;
+    margin-left: -10px;
 }
-
-
-
-
 
 /* Search Section */
 
@@ -422,9 +436,14 @@ const goToCart = () => {
 }
 
 .account-text {
-    font-size: var(--font-size-sm);
-    white-space: nowrap;
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 10ch; /* ~10 characters */
+  display: inline-block; /* needed so max-width applies */
 }
+
 
 /* Mobile Elements */
 .mobile-search-toggle {

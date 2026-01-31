@@ -1,17 +1,30 @@
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
-import path from 'path'
+import { defineConfig } from "vite";
+import vue from "@vitejs/plugin-vue";
+import path from "path";
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
-    }
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("leaflet")) return "leaflet";
+            if (id.includes("vue")) return "vue";
+            return "vendor";
+          }
+        },
+      },
+    },
   },
   server: {
     port: 3002,
-    host: "0.0.0.0"
-  }
-})
+    host: "0.0.0.0",
+  },
+});

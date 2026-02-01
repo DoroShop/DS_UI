@@ -36,6 +36,8 @@ const products = computed(() => {
     return [];
 });
 
+console.log('ProductCard component initialized with product list type:', products.value);
+
 // Format rating to consistent decimal display
 const formatRating = (rating: number | undefined): string => {
     if (!rating || rating === 0) return '0.0';
@@ -194,7 +196,6 @@ const viewProduct = (productId) => {
                         <img :src="item?.imageUrls[0]" 
                             @click="viewProduct(item._id)" 
                             fetchpriority="auto" 
-                            loading="lazy" 
                             decoding="async"
                             :alt="item?.name"
                             @error="handleImageError" />

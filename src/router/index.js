@@ -138,7 +138,7 @@ const routes = [
     path: "/shops/nearby",
     name: "NearbyShops",
     component: NearbyShops,
-    meta: { requiresAuth: true, hideMobileNav: true },
+    meta: {hideMobileNav: true },
   },
 
   // Vendor Routes

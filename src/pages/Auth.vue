@@ -382,18 +382,18 @@ async function handleFacebook() {
           <p v-if="authStore.loading">Logging in...</p>
           <p v-else>Login</p>
         </button>
-<!-- 
+
         <div class="divider"><span>or continue with</span></div>
         <div class="social-row">
           <button type="button" class="btn social google" @click="handleGoogle">
             <img src="../assets/icons8-google-32.png" alt="">
             <p>Google</p>
           </button>
-          <button type="button" class="btn social facebook" @click="handleFacebook">
+          <!-- <button type="button" class="btn social facebook" @click="handleFacebook">
             <img src="../assets/icons8-facebook-32.png" alt="">
             <p>Facebook</p>
-          </button>
-        </div> -->
+          </button> -->
+        </div>
       </form>
 
       <!-- REGISTER -->
@@ -764,7 +764,7 @@ select:focus {
 
 .social-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 0.75rem;
 }
 
@@ -775,9 +775,13 @@ select:focus {
   border: none;
   cursor: pointer;
   background: #f1f1ea;
-  color: #0f172a;
+
   transition: background 0.3s ease;
 
+}
+
+.social p{
+  color: rgb(80, 80, 80);
 }
 
 .btn.social:hover {

@@ -19,21 +19,35 @@ export const useVendorStore = defineStore("vendor", {
     isLoading: false as boolean,
     isFollows: false as boolean,
     followersCount: 0 as number,
+    error: null as string | null,
   }),
   actions: {
     async fetchSellerInfo(vendorId: string): Promise<void> {
 
+      this.error = null;
+
       try {
-        const respone = await axios.get(`${API_BASE_URL}/vendor/${vendorId}/details`, {headers})
-        this.vendorData = respone?.data?.data || { followers: [] } as Seller;
- 
-        if (!this.vendorData || this.vendorData.isApproved === false) {
+        const response = await axios.get(`${API_BASE_URL}/vendor/${vendorId}/details`, { headers });
+        const vendor = (response?.data?.data || {}) as Seller;
+
+        if (!vendor?._id || vendor.isApproved === false) {
           this.vendorData = { followers: [] } as Seller;
+          throw { status: 404, message: "Seller not found." };
         }
-      } catch (error) {
-        console.log(error)
+
+        this.vendorData = vendor;
+      } catch (error: any) {
+        const status = error?.response?.status || error?.status;
+        const message =
+          error?.response?.data?.error?.message ||
+          error?.response?.data?.error ||
+          error?.response?.data?.message ||
+          error?.message ||
+          "Failed to fetch seller.";
+
         this.vendorData = { followers: [] } as Seller;
-      } finally {
+        this.error = message;
+        throw { status, message };
       }
     },
     async fetchVendorProducts(vendorId): Promise<void> {

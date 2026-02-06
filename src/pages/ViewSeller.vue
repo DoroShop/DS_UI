@@ -56,6 +56,7 @@
 	import { useReviewStore } from "../stores/reviewStore";
 	import { Alert } from "../components/composable/Alert";
 	import { useTheme } from "../composables/useTheme";
+	import { calculateFinalPrice } from "../utils/priceCalculator";
 
 	const vendorStore = useVendorStore();
 	const reviewStore = useReviewStore();
@@ -169,9 +170,17 @@
 		// Then sort
 		switch (currentSort.value) {
 			case "price-low":
-				return products.sort((a, b) => a.price - b.price);
+				return products.sort(
+					(a, b) =>
+						calculateFinalPrice(a.price, a.promotion) -
+						calculateFinalPrice(b.price, b.promotion)
+				);
 			case "price-high":
-				return products.sort((a, b) => b.price - a.price);
+				return products.sort(
+					(a, b) =>
+						calculateFinalPrice(b.price, b.promotion) -
+						calculateFinalPrice(a.price, a.promotion)
+				);
 			case "name-az":
 				return products.sort((a, b) => a.name.localeCompare(b.name));
 			case "most-sold":
@@ -459,21 +468,21 @@
 			vendorStore.vendorData = {};
 			await vendorStore.fetchSellerInfo(id);
 
-			// Stop if vendor is missing or not approved
-			if (
-				!vendorStore.vendorData?._id ||
-				vendorStore.vendorData.isApproved === false
-			) {
-				return;
-			}
-
 			await vendorStore.fetchVendorProducts(id);
 			await vendorStore.isFollowing();
 			await vendorStore.followerCount();
 			loadedVendorId = id;
-		} catch (err) {
+		} catch (err: any) {
 			loadError = err;
+			const status = err?.status || err?.response?.status;
+			const message = err?.message || 'Failed to load vendor.';
 			console.error('Failed to load vendor:', err);
+
+			if (status === 404) {
+				router.replace({ name: 'NotFound', query: { source: 'seller', id } });
+				return;
+			}
+
 			throw err;
 		} finally {
 			loading.value = false;

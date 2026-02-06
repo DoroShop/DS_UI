@@ -4,49 +4,10 @@ const limit = pLimit(10);
 import axios from "axios";
 import { CartState } from "../types/cart";
 import { getAuthHeaders } from "../types/shared";
+import { isPromotionValid, calculateFinalPrice, hasActualDiscount } from "../utils/priceCalculator";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const MAX_CART_QUANTITY = 50; // Keep in sync with backend max quantity validation
-
-// Promotion helper functions
-const isPromotionValid = (promotion: any) => {
-  if (!promotion || !promotion.isActive) return false;
-  
-  const now = new Date();
-  
-  // Check start date - promotion hasn't started yet
-  if (promotion.startDate && new Date(promotion.startDate) > now) {
-    return false;
-  }
-  
-  // Check end date - promotion has expired
-  if (promotion.endDate && new Date(promotion.endDate) < now) {
-    return false;
-  }
-  
-  return true;
-};
-
-const getCurrentPrice = (originalPrice: number, promotion: any) => {
-  // Always validate promotion status in real-time
-  if (!isPromotionValid(promotion)) {
-    return originalPrice;
-  }
-  
-  if (promotion.discountType === 'percentage') {
-    return originalPrice - (originalPrice * promotion.discountValue / 100);
-  } else if (promotion.discountType === 'fixed') {
-    return Math.max(0, originalPrice - promotion.discountValue);
-  }
-  
-  return originalPrice;
-};
-
-const hasActualDiscount = (promotion: any) => {
-  if (!isPromotionValid(promotion)) return false;
-  const { discountType, discountValue } = promotion;
-  return discountType && discountType !== 'none' && discountValue > 0;
-};
 
 export const useCartStore = defineStore("cart", {
   state: (): CartState => ({
@@ -220,7 +181,7 @@ export const useCartStore = defineStore("cart", {
             const validPromotion = isPromotionValid(promotion) ? promotion : null;
             
             // Always calculate current price based on real-time promotion status
-            const currentPrice = getCurrentPrice(originalPrice, validPromotion);
+            const currentPrice = calculateFinalPrice(originalPrice, validPromotion);
             const isCurrentlyDiscounted = hasActualDiscount(validPromotion);
 
             const item = {
@@ -524,14 +485,16 @@ export const useCartStore = defineStore("cart", {
     async refreshCartPricing() {
       console.log('🔄 Force refreshing cart pricing...');
       
-      // Reset all cart state to ensure fresh fetch
-      this.isFetched = false;
-      this.cartData = { shops: [] };
-      this.selectedItems = [];
-      this.selectedItemData = [];
-      
-      // Fetch fresh data
-      await this.fetchCart();
+      // Fetch fresh data without clearing existing data (prevents glitch)
+      // Keep old data visible while fetching to avoid count flickering to 0
+      try {
+        await this.fetchCart();
+        // Only reset selections after successful fetch to avoid UI glitches
+        this.selectedItems = [];
+        this.selectedItemData = [];
+      } catch (error) {
+        console.error('❌ Error refreshing cart pricing:', error);
+      }
       
       console.log('✅ Cart pricing refreshed with current promotion status');
     },

@@ -41,6 +41,7 @@ const AdminCategories = () => import("../views/admin/AdminCategories.vue");
 const AdminMunicipalities = () =>
   import("../views/admin/AdminMunicipalities.vue");
 const AdminBanners = () => import("../views/admin/AdminBanners.vue");
+const ProductBannerAdmin = () => import("../views/admin/ProductBannerAdmin.vue");
 const AdminAnnouncements = () =>
   import("../views/admin/AdminAnnouncements.vue");
 const AdminRefunds = () => import("../views/admin/AdminRefunds.vue");
@@ -240,6 +241,11 @@ const routes = [
         path: "banners", 
         name: "AdminBanners",
         component: AdminBanners 
+      },
+      { 
+        path: "product-banners", 
+        name: "ProductBannerAdmin",
+        component: ProductBannerAdmin 
       },
       { 
         path: "announcements", 

@@ -72,8 +72,20 @@ export const useAuthStore = defineStore("auth", {
     loginError: null,
     registerError: null,
     verifyError: null,
+    forgotPasswordError: null,
+    resetPasswordError: null,
     csrfToken: null
   }),
+
+  getters: {
+    // Provide convenient aliases for common authentication checks
+    isLoggedIn: (state) => state.isAuthenticated,
+    currentUser: (state) => state.user,
+    hasRole: (state) => (role: string) => state.userRole === role,
+    isAdmin: (state) => state.userRole === 'admin',
+    isVendor: (state) => state.userRole === 'vendor',
+    isCustomer: (state) => state.userRole === 'customer'
+  },
 
   actions: {
     setRefreshing(isRefreshing) {
@@ -151,7 +163,7 @@ export const useAuthStore = defineStore("auth", {
       }
     },
 
-    async loginUser(email: string, password: string) {
+    async loginUser(email: string, password: string, redirectTo?: string) {
       this.loading = true;
       this.loginError = null;
       
@@ -173,12 +185,12 @@ export const useAuthStore = defineStore("auth", {
           // Fetch CSRF token after successful login
           await this.fetchCsrfToken();
           
-          // Get role-based redirect path
-          const redirectPath = this.getRoleBasedRedirect();
+          // Use provided redirect URL or fallback to role-based redirect
+          const redirectPath = redirectTo || this.getRoleBasedRedirect();
           
-          console.log('Redirecting to:', redirectPath, 'for role:', this.user?.role);
+          console.log('Redirecting to:', redirectPath, 'for role:', this.user?.role, 'redirectTo:', redirectTo);
           
-          // Redirect based on user role
+          // Redirect to the appropriate path
           window.location.assign(redirectPath);
         }
 
@@ -338,6 +350,68 @@ export const useAuthStore = defineStore("auth", {
         console.error('Registration failed:', err);
         this.verifyError = err.response?.data?.error || err.response?.data?.message || 'Registration failed. Please try again.';
         this.registerError = this.verifyError;
+        throw err;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    // NEW: Forgot password methods
+    async requestForgotPasswordOtp(email: string) {
+      this.forgotPasswordError = null;
+      this.loading = true;
+      
+      try {
+        const res = await axios.post(`${API_BASE_URL}/user/forgot-password`, { email }, {
+          headers: { "Content-Type": "application/json" },
+        });
+        console.log('Forgot password OTP request successful:', res.data);
+        return res.data;
+      } catch (err: any) {
+        console.error('Forgot password OTP request failed:', err);
+        this.forgotPasswordError = err.response?.data?.message || err.response?.data?.error || 'Failed to send password reset code. Please try again.';
+        throw err;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async verifyForgotPasswordOtp(email: string, otp: string) {
+      this.forgotPasswordError = null;
+      this.loading = true;
+      
+      try {
+        const res = await axios.post(`${API_BASE_URL}/user/verify-forgot-password-otp`, { email, otp }, {
+          headers: { "Content-Type": "application/json" },
+        });
+        console.log('Forgot password OTP verification successful:', res.data);
+        return res.data;
+      } catch (err: any) {
+        console.error('Forgot password OTP verification failed:', err);
+        this.forgotPasswordError = err.response?.data?.message || err.response?.data?.error || 'Invalid or expired verification code.';
+        throw err;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async resetPassword(email: string, resetToken: string, newPassword: string) {
+      this.resetPasswordError = null;
+      this.loading = true;
+      
+      try {
+        const res = await axios.post(`${API_BASE_URL}/user/reset-password`, { 
+          email, 
+          resetToken, 
+          newPassword 
+        }, {
+          headers: { "Content-Type": "application/json" },
+        });
+        console.log('Password reset successful:', res.data);
+        return res.data;
+      } catch (err: any) {
+        console.error('Password reset failed:', err);
+        this.resetPasswordError = err.response?.data?.message || err.response?.data?.error || 'Failed to reset password. Please try again.';
         throw err;
       } finally {
         this.loading = false;

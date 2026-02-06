@@ -5,6 +5,7 @@ import type { FeatureSeller } from "../types/seller";
 import { getAuthHeaders } from "../types/shared";
 import { Toast } from "../components/composable/Toast.js";
 import { refreshCartPricing } from "../utils/cartSync.js";
+import { calculateFinalPrice } from "../utils/priceCalculator";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -392,9 +393,21 @@ export const useProductsStore = defineStore("products", {
     applyClientFilter(products: Product[], filter: string = ""): Product[] {
       switch (filter) {
         case "Price: Low to High":
-          return products.slice().sort((a: any, b: any) => (a.price ?? 0) - (b.price ?? 0));
+          return products
+            .slice()
+            .sort(
+              (a: any, b: any) =>
+                calculateFinalPrice(a.price ?? 0, a.promotion) -
+                calculateFinalPrice(b.price ?? 0, b.promotion)
+            );
         case "Price: High to Low":
-          return products.slice().sort((a: any, b: any) => (b.price ?? 0) - (a.price ?? 0));
+          return products
+            .slice()
+            .sort(
+              (a: any, b: any) =>
+                calculateFinalPrice(b.price ?? 0, b.promotion) -
+                calculateFinalPrice(a.price ?? 0, a.promotion)
+            );
         case "Most Sold":
           return products.slice().sort((a: any, b: any) => (b.sold ?? 0) - (a.sold ?? 0));
         case "Best Rating":

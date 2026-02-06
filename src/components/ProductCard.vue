@@ -11,6 +11,7 @@ import { useVendorStore } from '../stores/vendorStores';
 import { handleImageError } from '../utils/fallbackImage';
 import { useCartStore } from '../stores/cartStores';
 import { useTheme } from '../composables/useTheme';
+import { isPromotionValid, calculateFinalPrice, hasActualDiscount, getDiscountPercentage } from '../utils/priceCalculator';
 
 const router = useRouter();
 
@@ -58,46 +59,8 @@ const formatSoldCount = (count: number | undefined): string => {
     return count.toString();
 };
 
-// Promotion helpers
-const isPromotionValid = (promotion: any) => {
-    if (!promotion || !promotion.isActive) return false;
-    const now = new Date();
-    // Check start date - promotion hasn't started yet
-    if (promotion.startDate && new Date(promotion.startDate) > now) return false;
-    // Check end date - promotion has expired  
-    if (promotion.endDate && new Date(promotion.endDate) < now) return false;
-    return true;
-};
-
-const calculateDiscountedPrice = (originalPrice: number, promotion: any) => {
-    if (!isPromotionValid(promotion)) return originalPrice;
-    
-    if (promotion.discountType === 'percentage') {
-        return originalPrice - (originalPrice * promotion.discountValue / 100);
-    } else if (promotion.discountType === 'fixed') {
-        return Math.max(0, originalPrice - promotion.discountValue);
-    }
-    return originalPrice;
-};
-
-const getDiscountPercentage = (promotion: any) => {
-    if (!isPromotionValid(promotion) || promotion.discountType === 'none') return 0;
-    
-    if (promotion.discountType === 'percentage') {
-        return promotion.discountValue;
-    }
-    return 0;
-};
-
 const hasActivePromotion = (item: Product) => {
     return isPromotionValid(item.promotion);
-};
-
-// Helper function to check if promotion has actual discount (not just free shipping)
-const hasActualDiscount = (promotion: any) => {
-    if (!isPromotionValid(promotion)) return false;
-    const { discountType, discountValue } = promotion;
-    return discountType && discountType !== 'none' && discountValue > 0;
 };
 
 // Helper function to check if promotion offers meaningful free shipping
@@ -228,7 +191,7 @@ const viewProduct = (productId) => {
                                         <template v-if="hasActivePromotion(item) && hasActualDiscount(item.promotion)">
                                             <span class="original-price">{{ formatToPHCurrency(item.price) }}</span>
                                             <span class="sale-price">
-                                                🔥 {{ formatToPHCurrency(calculateDiscountedPrice(item.price, item.promotion)) }}
+                                                🔥 {{ formatToPHCurrency(calculateFinalPrice(item.price, item.promotion)) }}
                                             </span>
                                         </template>
                                         <template v-else>

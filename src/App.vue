@@ -1,18 +1,34 @@
 <script setup>
-import MobileNav from './components/MobileNav.vue'
-import ToastNotification from './components/ToastNotification.vue'
+import { computed } from "vue";
+import { useRoute } from "vue-router";
+import MobileNav from "./components/MobileNav.vue";
+import ToastNotification from "./components/ToastNotification.vue";
 
+const route = useRoute();
+const keepAliveLookup = new Set(["Products", "Cart"]);
+const keepAliveMax = 3;
+
+const shouldDisplayMobileNav = computed(() => route.meta?.hideMobileNav !== true);
+const shouldCacheRoute = (name) => (name ? keepAliveLookup.has(name) : false);
 </script>
 
 <template>
-  <!-- Toast Notification System -->
   <ToastNotification />
-  
-  <!-- Keep components alive when navigating -->
-  <router-view v-slot="{ Component }">
-    <keep-alive :include="['Home', 'Cart', 'ViewProduct', 'ViewSeller', 'Search', 'ProductSearchResult', 'Orders']">
-      <component :is="Component" />
+
+  <router-view v-slot="{ Component, route: activeRoute }">
+    <keep-alive :max="keepAliveMax">
+      <component
+        v-if="Component && shouldCacheRoute(activeRoute?.name)"
+        :is="Component"
+        :key="activeRoute?.name ?? activeRoute?.fullPath"
+      />
     </keep-alive>
+    <component
+      v-if="Component && !shouldCacheRoute(activeRoute?.name)"
+      :is="Component"
+      :key="activeRoute?.fullPath"
+    />
   </router-view>
-  <MobileNav />
+
+  <MobileNav v-if="shouldDisplayMobileNav" />
 </template>

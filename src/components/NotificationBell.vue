@@ -6,8 +6,10 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotificationStore } from '@/stores/notificationStore'
-import { BellIcon, XMarkIcon, CheckIcon } from '@heroicons/vue/24/outline'
-import { BellAlertIcon } from '@heroicons/vue/24/solid'
+import BellIcon from '@heroicons/vue/24/outline/BellIcon'
+import XMarkIcon from '@heroicons/vue/24/outline/XMarkIcon'
+import CheckIcon from '@heroicons/vue/24/outline/CheckIcon'
+import BellAlertIcon from '@heroicons/vue/24/solid/BellAlertIcon'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
@@ -114,6 +116,7 @@ onUnmounted(() => {
       class="bell-button" 
       :class="{ 'has-unread': hasUnread }"
       @click="toggleDropdown"
+      title="Notifications"
       :aria-label="`Notifications ${hasUnread ? `(${unreadCount} unread)` : ''}`"
     >
       <component 
@@ -190,6 +193,8 @@ onUnmounted(() => {
 <style scoped>
 .notification-bell {
   position: relative;
+  display: flex;
+  align-items: center;
 }
 
 .bell-button {
@@ -197,24 +202,27 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  background: transparent;
+  padding: 0.5rem;
+  background: none;
   border: none;
-  border-radius: 50%;
+  color: var(--text-white);
   cursor: pointer;
-  transition: background 0.2s;
+  border-radius: 0.375rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 2.75rem;
+  min-width: 2.75rem;
 }
 
 .bell-button:hover {
-  background: var(--bg-tertiary);
+  background-color: rgba(255, 255, 255, 0.1);
+  transform: scale(1.05);
 }
 
 .bell-icon {
-  width: 1.5rem;
-  height: 1.5rem;
-  color: var(--text-secondary);
-  transition: color 0.2s;
+  width: var(--icon-width);
+  height: var(--icon-width);
+  color: var(--text-white);
+  transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .bell-button.has-unread .bell-icon {
@@ -228,7 +236,7 @@ onUnmounted(() => {
   min-width: 1.125rem;
   height: 1.125rem;
   padding: 0 0.25rem;
-  background: #ef4444;
+  background-color: var(--primary-color-2);
   color: white;
   font-size: 0.625rem;
   font-weight: 700;

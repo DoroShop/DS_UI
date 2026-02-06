@@ -1,26 +1,23 @@
 <script setup lang="js">
-import { ref, onMounted, onBeforeUnmount, nextTick, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick, computed, shallowRef } from 'vue';
 import { useRouter } from 'vue-router';
 import {useAuthStore} from '../stores/authStores';
 import Sidebar from "./Sidebar.vue"
 import Wallet from "./Wallet.vue"
 // import OrderTrackerModal from "./OrderTrackerModal.vue"
 import NotificationBell from "./NotificationBell.vue"
-import {
-    ShoppingCartIcon,
-    UserIcon,
-    MagnifyingGlassIcon,
-    MapPinIcon,
-    MoonIcon,
-    SunIcon,
-    Bars3Icon,
-    XMarkIcon,
-    TruckIcon,
-    ChatBubbleLeftIcon
-} from '@heroicons/vue/24/outline';
+import ShoppingCartIcon from '@heroicons/vue/24/outline/ShoppingCartIcon';
+import UserIcon from '@heroicons/vue/24/outline/UserIcon';
+import MagnifyingGlassIcon from '@heroicons/vue/24/outline/MagnifyingGlassIcon';
+import MapPinIcon from '@heroicons/vue/24/outline/MapPinIcon';
+import MoonIcon from '@heroicons/vue/24/outline/MoonIcon';
+import SunIcon from '@heroicons/vue/24/outline/SunIcon';
+import Bars3Icon from '@heroicons/vue/24/outline/Bars3Icon';
+import XMarkIcon from '@heroicons/vue/24/outline/XMarkIcon';
+import TruckIcon from '@heroicons/vue/24/outline/TruckIcon';
+import ChatBubbleLeftIcon from '@heroicons/vue/24/outline/ChatBubbleLeftIcon';
 import { useCartStore } from '../stores/cartStores';
 import { useOrderStore } from '../stores/OrderStores';
-import { useMessageStore } from '../stores/messageStore';
 import { useTheme } from '../composables/useTheme';
 
 
@@ -31,8 +28,16 @@ const userName = authStore.user?.name || 'Guest';
 const router = useRouter();
 const cartStore = useCartStore();
 const orderStore = useOrderStore();
-const messageStore = useMessageStore();
+const messageStoreRef = shallowRef(null);
 const { isDark, toggleTheme } = useTheme();
+
+const ensureMessageStore = async () => {
+    if (messageStoreRef.value) return messageStoreRef.value;
+    const module = await import('../stores/messageStore');
+    const store = module.useMessageStore();
+    messageStoreRef.value = store;
+    return store;
+}
 
 const isAccountOpen = ref(false);
 const isWalletOpen = ref(false)
@@ -51,7 +56,11 @@ const trackableOrdersCount = computed(() => {
     ).length;
 });
 
-const unreadMessagesCount = computed(() => messageStore.unreadCount || messageStore.computedUnreadCount);
+const unreadMessagesCount = computed(() => {
+    const store = messageStoreRef.value;
+    if (!store) return 0;
+    return store.unreadCount || store.computedUnreadCount;
+});
 
 const toggleMobileMenu = () => {
     isMobileMenuOpen.value = !isMobileMenuOpen.value;
@@ -65,7 +74,8 @@ const closeSearch = () => {
     isSearchExpanded.value = false;
 };
 
-const goToMessages = () => {
+const goToMessages = async () => {
+    await ensureMessageStore();
     router.push('/messages');
 };
 
@@ -106,14 +116,29 @@ const goToLoginPage = async () => {
 function onFocus() {
     router.push("/products/search")
 }
-const totalItems = computed(() => cartStore.Count);
+const totalItems = computed(() => cartStore.countItem);
 onMounted(async () => {
-    // await cartStore.fetchCart();
+    await cartStore.fetchCart();
     // await orderStore.fetchOrders();
     console.log("userrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr", authStore.user)
-    cartStore.itemCount()
     window.addEventListener('resize', handleResize);
     document.addEventListener('click', handleClickOutside);
+    if (authStore.isAuthenticated) {
+        const hydrateMessages = async () => {
+            try {
+                const store = await ensureMessageStore();
+                store.initializeSocket?.();
+            } catch (error) {
+                console.error('Failed to warm message store', error);
+            }
+        };
+
+        if ('requestIdleCallback' in window) {
+            window.requestIdleCallback(hydrateMessages, { timeout: 2000 });
+        } else {
+            setTimeout(hydrateMessages, 1200);
+        }
+    }
 }); 
 
 onBeforeUnmount(() => {
@@ -199,6 +224,8 @@ const goToCart = () => {
                         <span class="cart-badge">{{ totalItems }}</span>
                     </button>
                     <NotificationBell />
+             
+                 
                 </div>
                 <button ref="openButtonRef" v-if="authStore.isAuthenticated" @click="openAccountInfo" class="account-button">
                     <UserIcon class="account-icon" />

@@ -10,7 +10,7 @@ import {
 } from "vue"
 
 import Header from "../components/Header.vue"
-import Banner from "../components/Banner.vue"
+import BannerSlider from "../components/BannerSlider.vue"
 import Category from "../components/Category.vue"
 import FeaturedSeller from "../components/FeaturedSeller.vue"
 import FeaturedProduct from "../components/ProductCard.vue"
@@ -48,7 +48,8 @@ const trackScrollPosition = () => {
 const handleScroll = () => {
   if (scrollTimeout) clearTimeout(scrollTimeout)
   scrollTimeout = setTimeout(() => {
-    if (targetSection.value) {``
+    if (targetSection.value) {
+      ``
       targetSection.value.scrollIntoView({
         behavior: "smooth",
         block: "start"
@@ -148,9 +149,13 @@ onBeforeUnmount(() => {
 <template>
   <Header />
   <main ref="scrollContainer" class="product-listing-container">
-    <!-- <Banner /> -->
-    <Category class="sticky" @scrollTop="handleScroll" />
 
+
+    <!-- Hero Banner Slider -->
+    <div class="banner-section">
+      <BannerSlider placement="hero" :autoplay-interval="5000" />
+    </div>
+    <Category class="sticky" @scrollTop="handleScroll" />
     <section class="content">
       <span ref="targetSection"></span>
       <FeaturedSeller />
@@ -268,6 +273,10 @@ onBeforeUnmount(() => {
 .sticky {
   position: sticky !important;
   top: 4.8rem;
+}
+
+.banner-section {
+  padding: 10px;
 }
 
 .loading-wrapper {

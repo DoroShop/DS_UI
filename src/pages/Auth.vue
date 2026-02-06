@@ -4,29 +4,98 @@ import { EyeIcon, EyeSlashIcon } from "@heroicons/vue/24/outline";
 import { useAuthStore } from "../stores/authStores";
 import { useLocationStore } from "../stores/locationStore";
 import { useTheme } from "../composables/useTheme";
+import { useRoute, useRouter } from "vue-router";
+import { 
+  saveAuthSessionState, 
+  loadAuthSessionState, 
+  clearAuthSessionState,
+  saveForgotPasswordSessionState,
+  loadForgotPasswordSessionState,
+  clearForgotPasswordSessionState
+} from "../utils/authSessionStorage";
 
 const authStore = useAuthStore();
 const locationStore = useLocationStore();
 const { isDark } = useTheme();
+const route = useRoute();
+const router = useRouter();
 const view = ref("login");
 const statusMsg = ref("");
 
+/**
+ * Switch between auth views (login/register/verify/forgot-password/forgot-otp/reset-password)
+ * Saves the view state to localStorage for recovery on page refresh
+ */
 function switchView(v) {
   view.value = v;
   statusMsg.value = "";
+  
+  // Clear relevant error states when switching views
+  if (v === "login") {
+    authStore.loginError = null;
+    clearAuthSessionState();
+  } else if (v === "register") {
+    authStore.registerError = null;
+  } else if (v === "verify") {
+    authStore.verifyError = null;
+  } else if (v === "forgot-password") {
+    authStore.forgotPasswordError = null;
+  } else if (v === "forgot-otp") {
+    authStore.forgotPasswordError = null;
+  } else if (v === "reset-password") {
+    authStore.resetPasswordError = null;
+  }
+  
+  // Save view state to localStorage for persistence
+  if (v !== "login") {
+    if (v === "register" || v === "verify") {
+      // Registration flow - save to auth session storage
+      saveAuthSessionState(v, regForm);
+    } else if (v === "forgot-password" || v === "forgot-otp" || v === "reset-password") {
+      // Forgot password flow - save to forgot password session storage
+      saveForgotPasswordSessionState(v, forgotPasswordForm.email, resetToken.value);
+    }
+  } else {
+    // Login view - clear all session storage
+    clearAuthSessionState();
+    clearForgotPasswordSessionState();
+  }
 }
 
 const loginForm = reactive({ email: "", password: "" });
 const loginShowPw = ref(false);
 const loginLoading = ref(false);
 
+// NEW: Forgot password forms
+const forgotPasswordForm = reactive({ email: "" });
+const resetPasswordForm = reactive({ 
+  newPassword: "", 
+  confirmPassword: "" 
+});
+const forgotPasswordOtp = ref(["", "", "", "", "", ""]);
+const forgotPasswordOtpRefs = ref([]);
+const resetToken = ref("");
+const resetShowPw = ref(false);
+const resetShowPw2 = ref(false);
+
 async function handleLogin() {
-  await authStore.loginUser(loginForm.email, loginForm.password);
+  // Get redirect URL from query parameters
+  const redirectTo = route.query.redirect;
+  await authStore.loginUser(loginForm.email, loginForm.password, redirectTo);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Registration Form with Cascading Location Selection
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// FIXED LOCATION DEFAULTS: MIMAROPA (Region IV-B) & Oriental Mindoro
+// These are locked and cannot be changed by users in this version
+// ─────────────────────────────────────────────────────────────────────────────
+const DEFAULT_REGION_CODE = 'REGION_IV_B';
+const DEFAULT_REGION_NAME = 'Mimaropa (Region IV-B)';
+const DEFAULT_PROVINCE_CODE = '1705200000'; // Oriental Mindoro PSGC code
+const DEFAULT_PROVINCE_NAME = 'Oriental Mindoro';
+
 const regForm = reactive({
   name: "",
   email: "",
@@ -36,10 +105,10 @@ const regForm = reactive({
   phone: "",
   address: {
     street: "",
-    region: "",
-    regionCode: "",
-    province: "",
-    provinceCode: "",
+    region: DEFAULT_REGION_NAME,
+    regionCode: DEFAULT_REGION_CODE,
+    province: DEFAULT_PROVINCE_NAME,
+    provinceCode: DEFAULT_PROVINCE_CODE,
     city: "",
     cityCode: "",
     barangay: "",
@@ -75,60 +144,20 @@ const barangaysForCity = computed(() => {
 
 /**
  * Handle region selection change
- * - Sets region name and code
- * - Clears all child selections (province, city, barangay, zip)
- * - Fetches provinces for the selected region
+ * DISABLED: Region is locked to MIMAROPA for this version
  */
 async function handleRegionChange(code) {
-  // Clear all child selections first
-  regForm.address.province = "";
-  regForm.address.provinceCode = "";
-  regForm.address.city = "";
-  regForm.address.cityCode = "";
-  regForm.address.barangay = "";
-  regForm.address.barangayCode = "";
-  regForm.address.zipCode = "";
-
-  // Set new region
-  regForm.address.regionCode = code;
-  regForm.address.region = locationStore.regions.find((r) => r.code === code)?.name || "";
-
-  // Fetch provinces if region selected
-  if (code) {
-    try {
-      await locationStore.fetchProvinces(code);
-    } catch (error) {
-      console.error('[Auth] Failed to load provinces:', error);
-    }
-  }
+  console.warn('[Auth] Region change attempted but locked to MIMAROPA');
+  // No-op - region locked to default
 }
 
 /**
  * Handle province selection change
- * - Sets province name and code
- * - Clears child selections (city, barangay, zip)
- * - Fetches cities for the selected province
+ * DISABLED: Province is locked to Oriental Mindoro for this version
  */
 async function handleProvinceChange(code) {
-  // Clear child selections first
-  regForm.address.city = "";
-  regForm.address.cityCode = "";
-  regForm.address.barangay = "";
-  regForm.address.barangayCode = "";
-  regForm.address.zipCode = "";
-
-  // Set new province
-  regForm.address.provinceCode = code;
-  regForm.address.province = provincesForRegion.value.find((p) => p.code === code)?.name || "";
-
-  // Fetch cities if province selected
-  if (code) {
-    try {
-      await locationStore.fetchCities(code);
-    } catch (error) {
-      console.error('[Auth] Failed to load cities:', error);
-    }
-  }
+  console.warn('[Auth] Province change attempted but locked to Oriental Mindoro');
+  // No-op - province locked to default
 }
 
 /**
@@ -187,13 +216,101 @@ async function handleBarangayChange(code) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Lifecycle: Load regions on mount
+// Lifecycle Hooks
 // ─────────────────────────────────────────────────────────────────────────────
-onMounted(() => {
-  locationStore.fetchRegions().catch((err) => {
-    console.error('[Auth] Failed to load regions on mount:', err);
-  });
+
+/**
+ * On component mount:
+ * 1. Load regions (for reference)
+ * 2. Auto-load provinces for MIMAROPA region
+ * 3. Auto-load cities for Oriental Mindoro province
+ * 4. Restore registration state from localStorage if user was in the middle of signup
+ * 5. Reset OTP inputs if restoring to verify view
+ */
+onMounted(async () => {
+  try {
+    // Load regions (for completeness, though we don't show it)
+    await locationStore.fetchRegions().catch((err) => {
+      console.error('[Auth] Failed to load regions on mount:', err);
+    });
+    
+    // Auto-load provinces for the locked MIMAROPA region
+    console.log('[Auth] Auto-loading provinces for MIMAROPA...');
+    await locationStore.fetchProvinces(DEFAULT_REGION_CODE);
+    
+    // Auto-load cities for the locked Oriental Mindoro province
+    console.log('[Auth] Auto-loading cities for Oriental Mindoro...');
+    await locationStore.fetchCities(DEFAULT_PROVINCE_CODE);
+  } catch (error) {
+    console.error('[Auth] Failed to auto-load location data:', error);
+  }
+
+  // Check if user has a saved registration session (was interrupted mid-signup)
+  const savedState = loadAuthSessionState();
+  if (savedState) {
+    console.log(`[Auth] Restoring ${savedState.view} state from localStorage`);
+    
+    // Restore the view
+    view.value = savedState.view;
+    
+    // Restore registration form data (but keep locked location values)
+    Object.assign(regForm, savedState.regForm);
+    
+    // Ensure location fields stay locked to defaults
+    regForm.address.region = DEFAULT_REGION_NAME;
+    regForm.address.regionCode = DEFAULT_REGION_CODE;
+    regForm.address.province = DEFAULT_PROVINCE_NAME;
+    regForm.address.provinceCode = DEFAULT_PROVINCE_CODE;
+    
+    // If we're restoring to verify view, restart the resend countdown
+    if (savedState.view === "verify") {
+      startResendCountdown();
+      // Clear OTP input fields (user needs to re-enter)
+      otpDigits.value = ["", "", "", "", "", ""];
+    }
+  } else {
+    // Check if user has a saved forgot password session
+    const forgotPasswordState = loadForgotPasswordSessionState();
+    if (forgotPasswordState) {
+      console.log(`[Auth] Restoring forgot password ${forgotPasswordState.view} state from localStorage`);
+      
+      // Restore the view
+      view.value = forgotPasswordState.view;
+      
+      // Restore email
+      forgotPasswordForm.email = forgotPasswordState.email;
+      
+      // Restore reset token if available
+      if (forgotPasswordState.resetToken) {
+        resetToken.value = forgotPasswordState.resetToken;
+      }
+      
+      // If we're restoring to forgot-otp view, restart the resend countdown
+      if (forgotPasswordState.view === "forgot-otp") {
+        startResendCountdown();
+        // Clear OTP input fields (user needs to re-enter)
+        forgotPasswordOtp.value = ["", "", "", "", "", ""];
+      }
+    }
+  }
 });
+
+/**
+ * Watch for successful login and clear persisted session data
+ * This ensures we don't keep registration or forgot password data in localStorage after user is logged in
+ */
+watch(
+  () => authStore.isAuthenticated,
+  (isAuthenticated) => {
+    if (isAuthenticated && view.value !== "login") {
+      console.log('[Auth] User authenticated, clearing saved session state');
+      clearAuthSessionState();
+      clearForgotPasswordSessionState();
+      // Reset view to login for next visitor
+      view.value = "login";
+    }
+  }
+);
 
 const regShowPw = ref(false);
 const regShowPw2 = ref(false);
@@ -206,8 +323,9 @@ const canSubmitRegister = computed(() => {
     regForm.password === regForm.confirm &&
     regForm.phone &&
     regForm.address.street &&
-    regForm.address.regionCode &&
-    regForm.address.provinceCode &&
+    // Locked location validation - these should always be true
+    regForm.address.regionCode === DEFAULT_REGION_CODE &&
+    regForm.address.provinceCode === DEFAULT_PROVINCE_CODE &&
     regForm.address.cityCode &&
     regForm.address.barangay &&
     regForm.address.zipCode &&
@@ -233,6 +351,11 @@ async function handleRegister() {
     if (!authStore.registerError) {
       console.log('✅ OTP sent successfully, switching to verify view');
       view.value = "verify";
+      
+      // Persist registration state and view to localStorage
+      // This ensures user stays on verify page even after page refresh
+      saveAuthSessionState("verify", regForm);
+      
       startResendCountdown();
     } else {
       console.error('❌ OTP request failed:', authStore.registerError);
@@ -240,6 +363,106 @@ async function handleRegister() {
   } catch (error) {
     console.error('❌ Registration error:', error);
     // Error will be handled by the store
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW: Forgot Password Flow
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleForgotPassword() {
+  if (!forgotPasswordForm.email) return;
+
+  try {
+    await authStore.requestForgotPasswordOtp(forgotPasswordForm.email);
+    if (!authStore.forgotPasswordError) {
+      view.value = "forgot-otp";
+      // Save state when proceeding to OTP view
+      saveForgotPasswordSessionState("forgot-otp", forgotPasswordForm.email);
+      startResendCountdown();
+    }
+  } catch (error) {
+    console.error('Forgot password request failed:', error);
+  }
+}
+
+const forgotPasswordOtpComplete = computed(() => 
+  forgotPasswordOtp.value.every((d) => d)
+);
+
+function onForgotPasswordOtpInput(i) {
+  forgotPasswordOtp.value[i] = forgotPasswordOtp.value[i].replace(/\D/g, "");
+  if (forgotPasswordOtp.value[i] && i < forgotPasswordOtp.value.length - 1) {
+    forgotPasswordOtpRefs.value[i + 1]?.focus();
+  }
+}
+
+function onForgotPasswordKeyDown(e, i) {
+  if (e.key === "Backspace" && !forgotPasswordOtp.value[i] && i > 0) {
+    forgotPasswordOtpRefs.value[i - 1]?.focus();
+  }
+}
+
+async function handleVerifyForgotPasswordOtp() {
+  if (!forgotPasswordOtpComplete.value) return;
+
+  try {
+    const otp = forgotPasswordOtp.value.join("");
+    const result = await authStore.verifyForgotPasswordOtp(forgotPasswordForm.email, otp);
+    
+    if (!authStore.forgotPasswordError && result.resetToken) {
+      resetToken.value = result.resetToken;
+      view.value = "reset-password";
+      // Save state when proceeding to reset password view
+      saveForgotPasswordSessionState("reset-password", forgotPasswordForm.email, resetToken.value);
+    }
+  } catch (error) {
+    console.error('Forgot password OTP verification failed:', error);
+  }
+}
+
+async function resendForgotPasswordOtp() {
+  if (resendCountdown.value > 0) return;
+
+  try {
+    await authStore.requestForgotPasswordOtp(forgotPasswordForm.email);
+    if (!authStore.forgotPasswordError) {
+      statusMsg.value = "Password reset code resent";
+      startResendCountdown();
+    }
+  } catch (error) {
+    console.error('Failed to resend forgot password OTP:', error);
+  }
+}
+
+const canSubmitResetPassword = computed(() => {
+  return resetPasswordForm.newPassword.length >= 8 && 
+         resetPasswordForm.newPassword === resetPasswordForm.confirmPassword;
+});
+
+async function handleResetPassword() {
+  if (!canSubmitResetPassword.value) return;
+
+  try {
+    await authStore.resetPassword(
+      forgotPasswordForm.email, 
+      resetToken.value, 
+      resetPasswordForm.newPassword
+    );
+    
+    if (!authStore.resetPasswordError) {
+      statusMsg.value = "Password reset successful! You can now login.";
+      // Clear forms and redirect to login
+      forgotPasswordForm.email = "";
+      resetPasswordForm.newPassword = "";
+      resetPasswordForm.confirmPassword = "";
+      forgotPasswordOtp.value = ["", "", "", "", "", ""];
+      resetToken.value = "";
+      // Clear session state after successful reset
+      clearForgotPasswordSessionState();
+      view.value = "login";
+    }
+  } catch (error) {
+    console.error('Password reset failed:', error);
   }
 }
 
@@ -275,7 +498,11 @@ async function handleVerify() {
 
     // Only attempt login if registration was successful
     if (!authStore.verifyError && !authStore.registerError) {
+      console.log('✅ Registration verified successfully, logging in...');
       await authStore.loginUser(regForm.email, regForm.password);
+      
+      // Clear persisted session state after successful registration+login
+      clearAuthSessionState();
     }
   } catch (error) {
     console.error('Verification error:', error);
@@ -311,6 +538,8 @@ async function resendOtp() {
     await authStore.requestOtp(regForm.email);
     if (!authStore.registerError) {
       statusMsg.value = "OTP resent";
+      // Update saved session state with current form data
+      saveAuthSessionState("verify", regForm);
       startResendCountdown();
     }
   } catch (error) {
@@ -383,6 +612,11 @@ async function handleFacebook() {
           <p v-else>Login</p>
         </button>
 
+        <!-- NEW: Forgot Password Link -->
+        <button type="button" class="forgot-password-link" @click="switchView('forgot-password')">
+          Forgot Password?
+        </button>
+
         <div class="divider"><span>or continue with</span></div>
         <div class="social-row">
           <button type="button" class="btn social google" @click="handleGoogle">
@@ -434,32 +668,30 @@ async function handleFacebook() {
           <label>Street</label>
         </div>
 
-        <!-- REGION SELECT -->
+        <!-- REGION SELECT - LOCKED TO MIMAROPA -->
         <div class="form-group">
-          <label class="select-label">Region</label>
-          <select v-model="regForm.address.regionCode" @change="handleRegionChange($event.target.value)"
-            :disabled="locationStore.loadingRegions" required>
-            <option value="" disabled>
-              {{ locationStore.loadingRegions ? 'Loading regions...' : 'Select Region' }}
-            </option>
-            <option v-for="region in locationStore.regions" :key="region.code" :value="region.code">
-              {{ region.name }}
+          <label class="select-label">Region (Fixed)</label>
+          <select v-model="regForm.address.regionCode" disabled required>
+            <option :value="DEFAULT_REGION_CODE">
+              {{ DEFAULT_REGION_NAME }}
             </option>
           </select>
+          <small style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.25rem;">
+            🔒 Locked to {{ DEFAULT_REGION_NAME }} for this version
+          </small>
         </div>
 
-        <!-- PROVINCE SELECT -->
+        <!-- PROVINCE SELECT - LOCKED TO ORIENTAL MINDORO -->
         <div class="form-group">
-          <label class="select-label">Province</label>
-          <select v-model="regForm.address.provinceCode" @change="handleProvinceChange($event.target.value)"
-            :disabled="!regForm.address.regionCode || locationStore.loadingProvinces" required>
-            <option value="" disabled>
-              {{ locationStore.loadingProvinces ? 'Loading provinces...' : 'Select Province' }}
-            </option>
-            <option v-for="province in provincesForRegion" :key="province.code" :value="province.code">
-              {{ province.name }}
+          <label class="select-label">Province (Fixed)</label>
+          <select v-model="regForm.address.provinceCode" disabled required>
+            <option :value="DEFAULT_PROVINCE_CODE">
+              {{ DEFAULT_PROVINCE_NAME }}
             </option>
           </select>
+          <small style="color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.25rem;">
+            🔒 Locked to {{ DEFAULT_PROVINCE_NAME }} for this version
+          </small>
         </div>
 
         <!-- CITY/MUNICIPALITY SELECT -->
@@ -554,6 +786,99 @@ async function handleFacebook() {
           </button>
         </form>
       </div>
+
+      <!-- NEW: Forgot Password Form -->
+      <form v-else-if="view === 'forgot-password'" class="auth-form" @submit.prevent="handleForgotPassword">
+        <h2>Forgot Password</h2>
+        <p>Enter your email address and we'll send you a verification code to reset your password.</p>
+        
+        <p v-if="authStore.forgotPasswordError" class="login-error">
+          {{ authStore.forgotPasswordError }}
+        </p>
+
+        <div class="form-group floating-label">
+          <input v-model.trim="forgotPasswordForm.email" name="email" type="email" required placeholder=" " />
+          <label>Email Address</label>
+        </div>
+
+        <button type="submit" class="btn primary full" :disabled="!forgotPasswordForm.email || authStore.loading">
+          <p v-if="authStore.loading">Sending Code...</p>
+          <p v-else>Send Reset Code</p>
+        </button>
+
+        <button type="button" class="linkish back-to-login" @click="switchView('login')">
+          Back to Login
+        </button>
+      </form>
+
+      <!-- NEW: Forgot Password OTP Verification -->
+      <div v-else-if="view === 'forgot-otp'" class="verify-wrapper">
+        <h2>Enter Reset Code</h2>
+        <p>
+          Enter the 6-digit code sent to {{ forgotPasswordForm.email }}.
+        </p>
+
+        <form class="otp-form" @submit.prevent="handleVerifyForgotPasswordOtp">
+          <p v-if="authStore.forgotPasswordError" class="login-error">
+            {{ authStore.forgotPasswordError }}
+          </p>
+          <div class="otp-inputs">
+            <input v-for="(d, i) in forgotPasswordOtp" :key="i" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1"
+              ref="forgotPasswordOtpRefs" v-model="forgotPasswordOtp[i]" @input="onForgotPasswordOtpInput(i)" 
+              @keydown="onForgotPasswordKeyDown($event, i)" autocomplete="one-time-code" class="otp-box" />
+          </div>
+          <button type="button" class="linkish" @click="resendForgotPasswordOtp" :disabled="resendCountdown > 0">
+            Resend Code ({{ formatResendCountdown() }})
+          </button>
+          <button type="submit" class="btn primary verify" :disabled="!forgotPasswordOtpComplete || authStore.loading">
+            <p v-if="authStore.loading">Verifying...</p>
+            <p v-else>Verify Code</p>
+          </button>
+          <button type="button" class="linkish back-to-login" @click="switchView('login')">
+            Back to Login
+          </button>
+        </form>
+      </div>
+
+      <!-- NEW: Reset Password Form -->
+      <form v-else-if="view === 'reset-password'" class="auth-form" @submit.prevent="handleResetPassword">
+        <h2>Reset Password</h2>
+        <p>Enter your new password.</p>
+        
+        <p v-if="authStore.resetPasswordError" class="login-error">
+          {{ authStore.resetPasswordError }}
+        </p>
+
+        <div class="form-group floating-label password-group">
+          <input :type="resetShowPw ? 'text' : 'password'" v-model.trim="resetPasswordForm.newPassword" required minlength="8" placeholder=" " />
+          <label>New Password</label>
+          <button type="button" class="pw-toggle" @click="resetShowPw = !resetShowPw">
+            <component :is="resetShowPw ? EyeSlashIcon : EyeIcon" class="pw-icon" />
+          </button>
+        </div>
+        
+        <div class="form-group floating-label password-group">
+          <input :type="resetShowPw2 ? 'text' : 'password'" v-model.trim="resetPasswordForm.confirmPassword" required minlength="8" placeholder=" " />
+          <label>Confirm New Password</label>
+          <button type="button" class="pw-toggle" @click="resetShowPw2 = !resetShowPw2">
+            <component :is="resetShowPw2 ? EyeSlashIcon : EyeIcon" class="pw-icon" />
+          </button>
+        </div>
+
+        <div v-if="resetPasswordForm.newPassword && resetPasswordForm.confirmPassword && resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword" 
+             class="password-mismatch">
+          Passwords do not match
+        </div>
+
+        <button type="submit" class="btn primary full" :disabled="!canSubmitResetPassword || authStore.loading">
+          <p v-if="authStore.loading">Resetting Password...</p>
+          <p v-else>Reset Password</p>
+        </button>
+
+        <button type="button" class="linkish back-to-login" @click="switchView('login')">
+          Back to Login
+        </button>
+      </form>
 
 
       <p v-if="statusMsg" class="status-msg" :class="statusClass">{{ statusMsg }}</p>
@@ -865,5 +1190,49 @@ select:focus {
   font-size: 0.9rem;
   color: var(--text-primary);
   margin-top: 0.25rem;
+}
+
+/* NEW: Forgot Password Styles */
+.forgot-password-link {
+  background: none;
+  border: none;
+  color: var(--primary-color);
+  text-decoration: underline;
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0;
+  margin: 0.5rem 0;
+  text-align: center;
+  width: 100%;
+  transition: color 0.2s ease;
+}
+
+.forgot-password-link:hover {
+  color: var(--primary-dark);
+}
+
+.back-to-login {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  font-size: 0.85rem;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0.5rem 0;
+  text-align: center;
+  width: 100%;
+  margin-top: 1rem;
+  transition: color 0.2s ease;
+}
+
+.back-to-login:hover {
+  color: var(--text-primary);
+}
+
+.password-mismatch {
+  color: var(--error-color);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+  margin-bottom: 0.5rem;
 }
 </style>

@@ -289,7 +289,7 @@ onBeforeUnmount(() => {
     z-index: 66;
     transition: background-color var(--transition-fast);
     border-bottom: 1px solid var(--border-color);
-    margin-bottom: 1.5rem;
+    margin-top: -1rem;
 }
 
 .filter-container {

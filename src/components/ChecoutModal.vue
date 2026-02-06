@@ -5,7 +5,7 @@ import { formatToPHCurrency } from "../utils/currencyFormat";
 import { useCartStore } from "../stores/cartStores";
 import { useUserStore } from "../stores/userStores";
 import { useOrderStore } from "../stores/OrderStores";
-import { Alert } from "../components/composable/Alert.js";
+import { Toast } from "../components/composable/Toast.js";
 import { createQRPHPayment } from "../utils/paymentApi";
 import QRCodePaymentModal from "./QRCodePaymentModal.vue";
 import { useCheckoutAddressOverride } from "../composables/useCheckoutAddressOverride";
@@ -111,15 +111,18 @@ const customerAgreement = ref("");
 const isEditing = ref(false);
 const isSubmitting = ref(false);
 
-// Whether edited address should be saved to user profile when saving
-const saveToProfile = ref(false);
-
-// Checkout address override helper (transient localStorage persistence)
-const { get: getCheckoutAddressOverride, set: setCheckoutAddressOverride, clear: clearCheckoutAddressOverride } = useCheckoutAddressOverride();
+// Checkout address override helper (personalized shipping info persistence)
+const { get: getShippingInfo, set: setShippingInfo, getAddress: getCheckoutAddressOverride, setAddress: setCheckoutAddressOverride, clear: clearCheckoutAddressOverride } = useCheckoutAddressOverride();
 
 const shippingFee = ref<number | null>(0);
 
-const subtotal = computed(() => Number(cartStore.itemsSubtotal || 0));
+const subtotal = computed(() => {
+  // Use selectedItems from props for Buy Now, fallback to cart for normal checkout
+  if (props.selectedItems && props.selectedItems.length > 0) {
+    return calculateItemsSubtotal(props.selectedItems);
+  }
+  return Number(cartStore.itemsSubtotal || 0);
+});
 const normalizedShippingFee = computed(() => (typeof shippingFee.value === "number" ? shippingFee.value : 0));
 const totalAmount = computed(() => subtotal.value + normalizedShippingFee.value);
 
@@ -183,19 +186,19 @@ const initializeUserData = async () => {
       }
     }
 
-    const user = userStore.user || getUserData();
-    if (user) {
-      customerName.value = user.name || "";
-      phoneNumber.value = user.phone || "";
-      setAddress(user.address);
-    }
-
-    // Prefer a transient checkout override if present
-    const override = getCheckoutAddressOverride();
-    if (override) {
-      setAddress(override);
-      // When using an override we default to not saving to profile
-      saveToProfile.value = false;
+    // Load personalized shipping info from localStorage if available
+    const savedShippingInfo = getShippingInfo();
+    console.log('🏠 Loading saved shipping info:', savedShippingInfo);
+    
+    if (savedShippingInfo) {
+      customerName.value = savedShippingInfo.name || "";
+      phoneNumber.value = savedShippingInfo.phone || "";
+      setAddress(savedShippingInfo.address);
+    } else {
+      // Start with empty fields for first-time users
+      customerName.value = "";
+      phoneNumber.value = "";
+      setAddress({});
     }
 
     dataLoaded.value = true;
@@ -338,13 +341,13 @@ async function initiateQRPHPayment() {
     const response = await requestQrphPayment(description, metadata, checkoutData);
 
     if (!isPaymentSuccess(response)) {
-      Alert(response?.error || "Failed to create QRPH payment. Please try another payment method.");
+      Toast(response?.error || "Failed to create QRPH payment. Please try another payment method.", "error", 4000);
       return;
     }
 
     const qrCodeUrl = getQrCodeUrl(response);
     if (!qrCodeUrl) {
-      Alert("Payment created but QR code is missing. Please contact support.");
+      Toast("Payment created but QR code is missing. Please contact support.", "error", 4000);
       return;
     }
 
@@ -353,7 +356,7 @@ async function initiateQRPHPayment() {
     await openQrModalAndCloseCheckout();
   } catch (error) {
     console.error("QRPH payment error:", error);
-    Alert("Failed to initiate QRPH payment. Please try again.");
+    Toast("Failed to initiate QRPH payment. Please try again.", "error", 3000);
   } finally {
     isSubmitting.value = false;
   }
@@ -376,20 +379,20 @@ async function handleQRPaymentSuccess() {
     console.error("Failed to sync cart after payment:", err);
   }
 
-  Alert("Payment successful! Your order has been placed. Check your Orders page for details!");
+  Toast("Payment successful! Your order has been placed. Check your Orders page for details!", "success", 4000);
   emit("close");
 }
 
 function handleQRPaymentFailed() {
   showQRModal.value = false;
   clearPendingPayment();
-  Alert("Payment failed. Please try again or select a different payment method.");
+  Toast("Payment failed. Please try again or select a different payment method.", "error", 4000);
 }
 
 function handleQRPaymentExpired() {
   showQRModal.value = false;
   clearPendingPayment();
-  Alert("Payment expired. Please try again.");
+  Toast("Payment expired. Please try again.", "error", 3000);
 }
 
 function handleQRPaymentCancelled() {
@@ -468,13 +471,13 @@ const finalizeCheckoutSuccess = () => {
   clearCheckoutState();
   // Clear transient override on successful checkout to avoid leaking address across sessions
   clearCheckoutAddressOverride();
-  Alert("Order(s) placed successfully — check your Orders page for details!");
+  Toast("Order(s) placed successfully — check your Orders page for details!", "success", 4000);
   emit("close");
 };
 
 const finalizeCheckoutFailure = (error: unknown) => {
   console.error("submitOrder error", error);
-  Alert("An unexpected error occurred while creating your order. Please try again.");
+  Toast("An unexpected error occurred while creating your order. Please try again.", "error", 4000);
 };
 
 const finalizeCheckoutAlways = async () => {
@@ -493,12 +496,14 @@ async function submitOrder() {
 
   isSubmitting.value = true;
 
-  // Ensure the current address is persisted as a transient override unless the user chose to save to profile
-  if (!saveToProfile.value) {
-    setCheckoutAddressOverride({ ...address });
-  } else {
-    clearCheckoutAddressOverride();
-  }
+  // Always save personalized shipping info to localStorage
+  const shippingInfo = {
+    name: customerName.value,
+    phone: phoneNumber.value,
+    address: { ...address }
+  };
+  console.log('💾 Saving shipping info on order submit:', shippingInfo);
+  setShippingInfo(shippingInfo);
 
   try {
     const itemsByVendor = groupSelectedItemsByVendor(props.selectedItems);
@@ -508,7 +513,7 @@ async function submitOrder() {
       const created = await createVendorOrder(orderData);
 
       if (!created) {
-        Alert("Failed to place order for one of the vendors. Please try again or contact support.");
+        Toast("Failed to place order for one of the vendors. Please try again or contact support.", "error", 4000);
         continue;
       }
 
@@ -525,32 +530,34 @@ async function submitOrder() {
 
 const saveCustomerInfo = async () => {
   if (isEditing.value) {
-    const userInfo = { address, name: customerName.value, phone: phoneNumber.value };
     try {
-      if (saveToProfile.value) {
-        await userStore.updateUser(userInfo);
-        // If the user saved to profile, remove any transient override
-        clearCheckoutAddressOverride();
-        Alert("Profile updated");
-      } else {
-        // Persist a transient checkout-only override (does not touch profile)
-        setCheckoutAddressOverride({ ...address });
-        Alert("Address saved for this checkout only");
-      }
+      // Save complete personalized shipping info to localStorage
+      const shippingInfo = {
+        name: customerName.value,
+        phone: phoneNumber.value,
+        address: { ...address }
+      };
+      console.log('💾 Saving personalized shipping info:', shippingInfo);
+      setShippingInfo(shippingInfo);
+      Toast("Shipping information saved successfully!", "success", 3000);
     } catch (err) {
-      console.error("Failed to update user", err);
-      Alert("Failed to save profile changes");
+      console.error("Failed to save shipping info", err);
+      Toast("Failed to save shipping information", "error", 3000);
     }
   }
   isEditing.value = !isEditing.value;
 };
 
 const handleClose = () => {
-  // Persist current address as a transient override if it looks valid and user didn't choose to save it to profile
-  if (isAddressValid.value && !saveToProfile.value) {
-    setCheckoutAddressOverride({ ...address });
-  } else if (saveToProfile.value) {
-    clearCheckoutAddressOverride();
+  // Save personalized shipping info if valid
+  if (isAddressValid.value && customerName.value.trim() && phoneNumber.value.trim()) {
+    const shippingInfo = {
+      name: customerName.value,
+      phone: phoneNumber.value,
+      address: { ...address }
+    };
+    console.log('💾 Saving shipping info on close:', shippingInfo);
+    setShippingInfo(shippingInfo);
   }
 
   clearCheckoutState();
@@ -616,7 +623,7 @@ onMounted(async () => {
             <div class="address-header">
               <h3 class="section-title">
                 <UserIcon class="section-icon" />
-                Customer Information
+                Shipping Address
               </h3>
               <button v-if="hasAddress" @click="saveCustomerInfo" class="edit-btn" :disabled="isSubmitting">
                 {{ isEditing ? "Save" : "Edit" }}
@@ -663,13 +670,6 @@ onMounted(async () => {
                 </label>
               </div>
 
-              <div class="save-to-profile" v-if="isEditing">
-                <label class="checkbox-inline">
-                  <input type="checkbox" v-model="saveToProfile" />
-                  <span>Save this address to my profile</span>
-                </label>
-              </div>
-
               <p v-if="!isAddressValid" class="error">Please complete all address fields.</p>
             </div>
 
@@ -703,7 +703,7 @@ onMounted(async () => {
             <div class="totals">
               <div class="subtotal">
                 <span>Subtotal:</span>
-                <strong>{{ formatToPHCurrency(cartStore.itemsSubtotal) }}</strong>
+                <strong>{{ formatToPHCurrency(subtotal) }}</strong>
               </div>
               <div class="subtotal">
                 <span>Shipping:</span>

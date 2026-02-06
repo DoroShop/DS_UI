@@ -30,16 +30,17 @@ const selectedBanner = ref<any>(null);
 const bannerForm = ref({
   title: '',
   subtitle: '',
-  link: '',
+  linkType: 'none' as 'none' | 'external' | 'internal' | 'category',
+  externalLink: '',
+  internalLink: '',
+  categoryLink: '',
   image: null as File | null,
   imagePreview: '',
-  productImage: null as File | null,
-  productImagePreview: '',
-  position: 1,
+  displayOrder: 1,
   isActive: true,
-  startDate: '',
-  endDate: '',
-  // New fields for background customization
+  placement: 'hero',
+  campaignType: 'regular',
+  // Background customization fields
   backgroundType: 'gradient' as 'gradient' | 'image' | 'glassmorphism',
   gradientColor: 'linear-gradient(135deg, #cfee7a 0%, #f8cf2a 50%, #ffa726 100%)',
   hasButton: true,
@@ -344,6 +345,18 @@ const toggleBannerStatus = async (banner: any) => {
   }
 };
 
+// Get link text based on link type
+const getLinkText = (banner: any) => {
+  if (banner.linkType === 'external' && banner.externalLink) {
+    return banner.externalLink.substring(0, 30) + (banner.externalLink.length > 30 ? '...' : '');
+  } else if (banner.linkType === 'internal' && banner.internalLink) {
+    return banner.internalLink.substring(0, 30) + (banner.internalLink.length > 30 ? '...' : '');
+  } else if (banner.linkType === 'category' && banner.categoryLink) {
+    return `Category: ${banner.categoryLink}`;
+  }
+  return null;
+};
+
 // Format date
 const formatDate = (date: string) => {
   if (!date) return 'No date';
@@ -440,8 +453,8 @@ onMounted(() => {
         
         <div class="banner-preview">
           <img 
-            v-if="banner.image" 
-            :src="banner.image" 
+            v-if="banner.imageUrl" 
+            :src="banner.imageUrl" 
             :alt="banner.title || 'Banner'"
           />
           <div v-else class="placeholder-image">
@@ -450,15 +463,18 @@ onMounted(() => {
         </div>
         
         <div class="banner-info">
-          <h3 class="banner-title">{{ banner.title || 'Untitled Banner' }}</h3>
+          <h3 class="banner-title">
+            {{ banner.title || (banner.backgroundType === 'image' ? 'Image Banner' : 'Gradient Banner') }}
+          </h3>
           <p v-if="banner.subtitle" class="banner-subtitle">{{ banner.subtitle }}</p>
+          <p v-else-if="banner.hasButton && banner.buttonText" class="banner-subtitle">{{ banner.buttonText }}</p>
           <div class="banner-meta">
-            <span v-if="banner.link" class="meta-item link">
+            <span v-if="getLinkText(banner)" class="meta-item link">
               <LinkIcon class="meta-icon" />
-              {{ banner.link.substring(0, 30) }}{{ banner.link.length > 30 ? '...' : '' }}
+              {{ getLinkText(banner) }}
             </span>
             <span class="meta-item date">
-              {{ formatDate(banner.startDate) }} - {{ formatDate(banner.endDate) }}
+              {{ formatDate(banner.createdAt) }}
             </span>
           </div>
         </div>

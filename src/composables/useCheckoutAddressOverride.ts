@@ -1,11 +1,18 @@
 import { ref } from "vue";
 import type { Address } from "../types/order";
 
+// Extended shipping info for personalized checkout
+interface PersonalizedShippingInfo {
+  name?: string;
+  phone?: string;
+  address: Address;
+}
+
 const KEY = "checkoutAddressOverride";
-const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days for better UX
 
 type Stored = {
-  address: Address;
+  shippingInfo: PersonalizedShippingInfo;
   ts: number;
   ttl?: number;
 };
@@ -26,7 +33,7 @@ export function useCheckoutAddressOverride() {
     }
   }
 
-  function get(): Address | null {
+  function get(): PersonalizedShippingInfo | null {
     const s = _readRaw();
     if (!s) return null;
     const ttl = typeof s.ttl === "number" ? s.ttl : DEFAULT_TTL_MS;
@@ -35,17 +42,34 @@ export function useCheckoutAddressOverride() {
       return null;
     }
     last.value = s;
-    return s.address;
+    return s.shippingInfo;
   }
 
-  function set(address: Address, ttl?: number) {
-    const s: Stored = { address, ts: Date.now(), ttl };
+  function set(shippingInfo: PersonalizedShippingInfo, ttl?: number) {
+    const s: Stored = { shippingInfo, ts: Date.now(), ttl };
     try {
       localStorage.setItem(KEY, JSON.stringify(s));
       last.value = s;
     } catch (e) {
-      console.error("Failed to write checkout override to localStorage", e);
+      console.error("Failed to write shipping info to localStorage", e);
     }
+  }
+
+  // Legacy method for backward compatibility - returns just the address
+  function getAddress(): Address | null {
+    const info = get();
+    return info?.address || null;
+  }
+
+  // Legacy method for backward compatibility - sets just the address
+  function setAddress(address: Address, ttl?: number) {
+    const existing = get();
+    const shippingInfo: PersonalizedShippingInfo = {
+      name: existing?.name,
+      phone: existing?.phone,
+      address
+    };
+    set(shippingInfo, ttl);
   }
 
   function clear() {
@@ -57,5 +81,5 @@ export function useCheckoutAddressOverride() {
     }
   }
 
-  return { get, set, clear } as const;
+  return { get, set, getAddress, setAddress, clear } as const;
 }

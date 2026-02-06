@@ -30,6 +30,8 @@ export const useAdminDashboardStore = defineStore('adminDashboard', () => {
   
   // Seller Applications
   const pendingApplications = ref<any[]>([]);
+  const applicationHistory = ref<any[]>([]);
+  const applicationHistoryPagination = ref({ total: 0, page: 1, limit: 20, totalPages: 0 });
   
   // Products
   const products = ref<any[]>([]);
@@ -369,6 +371,27 @@ export const useAdminDashboardStore = defineStore('adminDashboard', () => {
       return response.data;
     } catch (err: any) {
       error.value = err.response?.data?.error || 'Failed to review application';
+      throw err;
+    }
+  }
+
+  async function fetchApplicationHistory(filters: { status?: string; search?: string; page?: number; limit?: number } = {}) {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/admin/dashboard/applications/history`, {
+        params: filters,
+        withCredentials: true, headers: getAuthHeaders()
+      });
+      const data = response.data.data;
+      applicationHistory.value = data.applications;
+      applicationHistoryPagination.value = {
+        total: data.total,
+        page: data.page,
+        limit: data.limit,
+        totalPages: data.totalPages
+      };
+      return data;
+    } catch (err: any) {
+      error.value = err.response?.data?.error || 'Failed to fetch application history';
       throw err;
     }
   }
@@ -1310,6 +1333,8 @@ export const useAdminDashboardStore = defineStore('adminDashboard', () => {
     selectedSeller,
     sellerPerformance,
     pendingApplications,
+    applicationHistory,
+    applicationHistoryPagination,
     products,
     productsPagination,
     pendingProducts,
@@ -1356,6 +1381,7 @@ export const useAdminDashboardStore = defineStore('adminDashboard', () => {
     fetchSellers,
     fetchSellerPerformance,
     fetchPendingApplications,
+    fetchApplicationHistory,
     reviewSellerApplication,
     
     // Product Actions

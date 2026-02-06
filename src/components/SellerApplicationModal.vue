@@ -6,22 +6,12 @@ import {
   ExclamationTriangleIcon,
   CheckCircleIcon,
   InformationCircleIcon,
-  MapPinIcon,
-  PhotoIcon
+  PhotoIcon,
+  LockClosedIcon
 } from '@heroicons/vue/24/outline'
 import { useSellerApplicationStore, type SellerApplicationForm } from '../stores/sellerApplicationStore'
 import { useLocationStore } from '../stores/locationStore'
 import { useTheme } from '../composables/useTheme'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
-
-// Fix Leaflet default marker icons
-delete (L.Icon.Default.prototype as any)._getIconUrl
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-})
 
 interface Props {
   isOpen: boolean
@@ -39,13 +29,21 @@ const { isDark } = useTheme()
 const sellerStore = useSellerApplicationStore()
 const locationStore = useLocationStore()
 
+// LOCKED LOCATION DEFAULTS: MIMAROPA (Region IV-B) & Oriental Mindoro
+// These are locked and cannot be changed by users in this version
+const DEFAULT_REGION_CODE = 'REGION_IV_B';
+const DEFAULT_REGION_NAME = 'Mimaropa (Region IV-B)';
+const DEFAULT_PROVINCE_CODE = '1705200000'; // Oriental Mindoro PSGC code
+const DEFAULT_PROVINCE_NAME = 'Oriental Mindoro';
+
 // Form state - stores codes for API selection
 const form = reactive<SellerApplicationForm>({
   shopName: '',
-  region: '',
-  province: '',
+  region: DEFAULT_REGION_CODE,
+  province: DEFAULT_PROVINCE_CODE,
   municipality: '',
   barangay: '',
+  address: '', // Required by SellerApplicationForm type
   zipCode: '',
   street: '',
   additionalInfo: '',
@@ -54,24 +52,27 @@ const form = reactive<SellerApplicationForm>({
   birTin: null,
   dtiOrSec: null,
   fdaCertificate: null,
+  businessPermit: null,
   shopProfile: null, // New: Shop profile image (required)
-})
-
-// Shop location state (optional)
-const shopLocation = reactive({
-  latitude: null as number | null,
-  longitude: null as number | null,
-  useCurrentLocation: false
 })
 
 // Shop profile image preview
 const shopProfilePreview = ref<string | null>(null)
 const shopProfileInput = ref<HTMLInputElement>()
 
+// Document previews
+const documentPreviews = reactive({
+  governmentId: null as string | null,
+  birTin: null as string | null,
+  dtiOrSec: null as string | null,
+  fdaCertificate: null as string | null,
+  businessPermit: null as string | null,
+})
+
 // Track location names separately (for display and submission)
 const locationNames = reactive({
-  region: '',
-  province: '',
+  region: DEFAULT_REGION_NAME,
+  province: DEFAULT_PROVINCE_NAME,
   municipality: '',
   barangay: '',
 })
@@ -81,27 +82,20 @@ const govIdInput = ref<HTMLInputElement>()
 const birTinInput = ref<HTMLInputElement>()
 const dtiSecInput = ref<HTMLInputElement>()
 const fdaInput = ref<HTMLInputElement>()
+const businessPermitInput = ref<HTMLInputElement>()
 
 // Local state
 const isSubmitting = ref(false)
 const showSuccess = ref(false)
 const validationErrors = ref<string[]>([])
 
-// Map state
-const mapContainer = ref<HTMLDivElement>()
-const map = ref<L.Map | null>(null)
-const marker = ref<L.Marker | null>(null)
-const showLocationSection = ref(false)
-const isGettingLocation = ref(false)
-const locationError = ref('')
-const manualLatitude = ref('')
-const manualLongitude = ref('')
 // File upload state
 const uploadProgress = ref({
   governmentId: false,
   birTin: false,
   dtiOrSec: false,
   fdaCertificate: false,
+  businessPermit: false,
 })
 
 // Location data
@@ -123,11 +117,6 @@ const isValid = computed(() => {
          form.birTin &&
          form.dtiOrSec &&
          validationErrors.value.length === 0
-})
-
-// Check if location is set
-const hasLocation = computed(() => {
-  return shopLocation.latitude !== null && shopLocation.longitude !== null
 })
 
 const isPdfFile = (file: File | null) => file?.type === 'application/pdf'
@@ -172,205 +161,6 @@ const removeShopProfile = () => {
   validationErrors.value = validationErrors.value.filter(e => !e.includes('Shop Profile'))
   if (shopProfileInput.value) {
     shopProfileInput.value.value = ''
-  }
-}
-
-// Map Functions
-const initializeMap = async () => {
-  await nextTick()
-  
-  if (!mapContainer.value || map.value) return
-  
-  // Default to Philippines center
-  const defaultCenter: [number, number] = [12.8797, 121.7740]
-  const initialCenter = hasLocation.value 
-    ? [shopLocation.latitude!, shopLocation.longitude!] as [number, number]
-    : defaultCenter
-  
-  map.value = L.map(mapContainer.value, {
-    center: initialCenter,
-    zoom: hasLocation.value ? 15 : 6,
-    zoomControl: true
-  })
-  
-  // Always use standard OpenStreetMap tiles
-  const tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-  
-  L.tileLayer(tileUrl, {
-    maxZoom: 19,
-    attribution: '© OpenStreetMap contributors'
-  }).addTo(map.value)
-  
-  // Add marker if location exists
-  if (hasLocation.value) {
-    addMarker(shopLocation.latitude!, shopLocation.longitude!)
-  }
-  
-  // Click on map to set location
-  map.value.on('click', (e: L.LeafletMouseEvent) => {
-    setLocation(e.latlng.lat, e.latlng.lng)
-  })
-}
-
-const destroyMap = () => {
-  if (map.value) {
-    map.value.remove()
-    map.value = null
-    marker.value = null
-  }
-}
-
-const addMarker = (lat: number, lng: number) => {
-  if (!map.value) return
-  
-  // Remove existing marker
-  if (marker.value) {
-    map.value.removeLayer(marker.value)
-  }
-  
-  // Create custom icon with shop name
-  const customIcon = L.divIcon({
-    className: 'custom-marker',
-    html: `
-      <div class="marker-container">
-        <div class="marker-pin"></div>
-        <span class="marker-label">${form.shopName || 'Your Shop'}</span>
-      </div>
-    `,
-    iconSize: [40, 50],
-    iconAnchor: [20, 50]
-  })
-  
-  marker.value = L.marker([lat, lng], { 
-    icon: customIcon,
-    draggable: true 
-  }).addTo(map.value)
-  
-  // Update location on marker drag
-  marker.value.on('dragend', () => {
-    const pos = marker.value?.getLatLng()
-    if (pos) {
-      setLocation(pos.lat, pos.lng, false)
-    }
-  })
-}
-
-const setLocation = (lat: number, lng: number, updateMap = true) => {
-  // Validate coordinates
-  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    locationError.value = 'Invalid coordinates'
-    return
-  }
-  
-  shopLocation.latitude = parseFloat(lat.toFixed(6))
-  shopLocation.longitude = parseFloat(lng.toFixed(6))
-  manualLatitude.value = shopLocation.latitude.toString()
-  manualLongitude.value = shopLocation.longitude.toString()
-  locationError.value = ''
-  
-  if (updateMap && map.value) {
-    addMarker(lat, lng)
-    map.value.setView([lat, lng], 15)
-  }
-}
-
-const getCurrentLocation = () => {
-  if (!navigator.geolocation) {
-    locationError.value = 'Geolocation is not supported by your browser'
-    return
-  }
-  
-  isGettingLocation.value = true
-  locationError.value = ''
-  
-  // Try high accuracy first for better precision
-  const tryGetLocation = (highAccuracy: boolean, isRetry = false) => {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocation(position.coords.latitude, position.coords.longitude)
-        shopLocation.useCurrentLocation = true
-        isGettingLocation.value = false
-      },
-      (error) => {
-        // If high accuracy failed and this isn't a retry, try with low accuracy
-        if (highAccuracy && !isRetry && error.code === error.TIMEOUT) {
-          console.log('High accuracy timed out, trying low accuracy...')
-          tryGetLocation(false, true)
-          return
-        }
-        
-        isGettingLocation.value = false
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            locationError.value = 'Location access denied. Please enable location permission in your browser settings.'
-            break
-          case error.POSITION_UNAVAILABLE:
-            locationError.value = 'Location information unavailable. Please enter coordinates manually.'
-            break
-          case error.TIMEOUT:
-            locationError.value = 'Location request timed out. Please try again or enter coordinates manually.'
-            break
-          default:
-            locationError.value = 'Unable to get your location. Please enter coordinates manually.'
-        }
-      },
-      {
-        enableHighAccuracy: highAccuracy,
-        timeout: highAccuracy ? 20000 : 30000,
-        maximumAge: 0 // Always get fresh location for accuracy
-      }
-    )
-  }
-  
-  // Start with high accuracy
-  tryGetLocation(true)
-}
-
-const applyManualCoordinates = () => {
-  const lat = parseFloat(manualLatitude.value)
-  const lng = parseFloat(manualLongitude.value)
-  
-  if (isNaN(lat) || isNaN(lng)) {
-    locationError.value = 'Please enter valid numbers for coordinates'
-    return
-  }
-  
-  if (lat < -90 || lat > 90) {
-    locationError.value = 'Latitude must be between -90 and 90'
-    return
-  }
-  
-  if (lng < -180 || lng > 180) {
-    locationError.value = 'Longitude must be between -180 and 180'
-    return
-  }
-  
-  setLocation(lat, lng)
-}
-
-const removeLocation = () => {
-  shopLocation.latitude = null
-  shopLocation.longitude = null
-  shopLocation.useCurrentLocation = false
-  manualLatitude.value = ''
-  manualLongitude.value = ''
-  locationError.value = ''
-  
-  if (marker.value && map.value) {
-    map.value.removeLayer(marker.value)
-    marker.value = null
-    map.value.setView([12.8797, 121.7740], 6)
-  }
-}
-
-const toggleLocationSection = async () => {
-  showLocationSection.value = !showLocationSection.value
-  
-  if (showLocationSection.value) {
-    await nextTick()
-    initializeMap()
-  } else {
-    destroyMap()
   }
 }
 
@@ -428,30 +218,60 @@ const validateFile = (file: File | null, maxSize = 10, allowedTypes: string[] = 
 }
 
 // File handlers
-const handleFileSelect = (event: Event, field: 'governmentId' | 'birTin' | 'dtiOrSec' | 'fdaCertificate') => {
+const handleFileSelect = (event: Event, field: 'governmentId' | 'birTin' | 'dtiOrSec' | 'fdaCertificate' | 'businessPermit') => {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0] || null
   
-  form[field] = file
+  if (!file) return
   
   // Validate file
   const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf']
   const error = validateFile(file, 10, allowedTypes)
   
-  // Update validation errors
-  const errorKey = `${field}Error`
+  if (error) {
+    validationErrors.value = validationErrors.value.filter(err => !err.includes(field))
+    validationErrors.value.push(`${field}: ${error}`)
+    return
+  }
+  
+  // Set file to form
+  form[field] = file
+  
+  // Remove previous errors
   validationErrors.value = validationErrors.value.filter(err => !err.includes(field))
   
-  if (error) {
-    validationErrors.value.push(`${field}: ${error}`)
+  // Create preview for images
+  if (file.type.startsWith('image/')) {
+    const previewKey = field as keyof typeof documentPreviews
+    if (previewKey in documentPreviews) {
+      // Clean up previous preview
+      if (documentPreviews[previewKey]) {
+        URL.revokeObjectURL(documentPreviews[previewKey]!)
+      }
+      documentPreviews[previewKey] = URL.createObjectURL(file)
+    }
+  } else {
+    // For PDFs, clear any existing preview
+    const previewKey = field as keyof typeof documentPreviews
+    if (previewKey in documentPreviews && documentPreviews[previewKey]) {
+      URL.revokeObjectURL(documentPreviews[previewKey]!)
+      documentPreviews[previewKey] = null
+    }
   }
   
   uploadProgress.value[field] = !!file
 }
 
-const removeFile = (field: 'governmentId' | 'birTin' | 'dtiOrSec' | 'fdaCertificate') => {
+const removeFile = (field: 'governmentId' | 'birTin' | 'dtiOrSec' | 'fdaCertificate' | 'businessPermit') => {
   form[field] = null
   uploadProgress.value[field] = false
+  
+  // Clean up image preview
+  const previewKey = field as keyof typeof documentPreviews
+  if (documentPreviews[previewKey]) {
+    URL.revokeObjectURL(documentPreviews[previewKey]!)
+    documentPreviews[previewKey] = null
+  }
   
   // Clear validation errors for this field
   validationErrors.value = validationErrors.value.filter(err => !err.includes(field))
@@ -465,14 +285,16 @@ const removeFile = (field: 'governmentId' | 'birTin' | 'dtiOrSec' | 'fdaCertific
     dtiSecInput.value.value = ''
   } else if (field === 'fdaCertificate' && fdaInput.value) {
     fdaInput.value.value = ''
+  } else if (field === 'businessPermit' && businessPermitInput.value) {
+    businessPermitInput.value.value = ''
   }
 }
 
-const getFileName = (field: 'governmentId' | 'birTin' | 'dtiOrSec' | 'fdaCertificate') => {
+const getFileName = (field: 'governmentId' | 'birTin' | 'dtiOrSec' | 'fdaCertificate' | 'businessPermit') => {
   return form[field]?.name || ''
 }
 
-const getFileSize = (field: 'governmentId' | 'birTin' | 'dtiOrSec' | 'fdaCertificate') => {
+const getFileSize = (field: 'governmentId' | 'birTin' | 'dtiOrSec' | 'fdaCertificate' | 'businessPermit') => {
   const file = form[field]
   if (!file) return ''
   
@@ -513,15 +335,17 @@ const validateForm = () => {
   const dtiError = validateFile(form.dtiOrSec)
   if (dtiError) errors.push(`DTI/SEC: ${dtiError}`)
 
+  // Business Permit is required
+  if (!form.businessPermit) {
+    errors.push('Business Permit is required')
+  } else {
+    const businessPermitError = validateFile(form.businessPermit)
+    if (businessPermitError) errors.push(`Business Permit: ${businessPermitError}`)
+  }
+
   // FDA certificate is optional but must be valid if provided
   const fdaError = form.fdaCertificate ? validateFile(form.fdaCertificate) : null
   if (fdaError) errors.push(`FDA Certificate: ${fdaError}`)
-  
-  // Validate location if coordinates are partially filled
-  if ((shopLocation.latitude !== null && shopLocation.longitude === null) ||
-      (shopLocation.latitude === null && shopLocation.longitude !== null)) {
-    errors.push('Please provide both latitude and longitude, or leave both empty')
-  }
   
   validationErrors.value = errors
   return errors.length === 0
@@ -542,9 +366,6 @@ const submitApplication = async () => {
       provinceName: locationNames.province,
       municipalityName: locationNames.municipality,
       barangayName: locationNames.barangay,
-      // Include shop location if provided
-      shopLatitude: shopLocation.latitude,
-      shopLongitude: shopLocation.longitude,
     })
     showSuccess.value = true
     
@@ -571,10 +392,11 @@ const closeModal = () => {
 
 const resetForm = () => {
   form.shopName = ''
-  form.region = ''
-  form.province = ''
+  form.region = DEFAULT_REGION_CODE
+  form.province = DEFAULT_PROVINCE_CODE
   form.municipality = ''
   form.barangay = ''
+  form.address = '' // Required by SellerApplicationForm type
   form.zipCode = ''
   form.street = ''
   form.additionalInfo = ''
@@ -583,11 +405,12 @@ const resetForm = () => {
   form.birTin = null
   form.dtiOrSec = null
   form.fdaCertificate = null
+  form.businessPermit = null
   form.shopProfile = null
   
   // Reset location names
-  locationNames.region = ''
-  locationNames.province = ''
+  locationNames.region = DEFAULT_REGION_NAME
+  locationNames.province = DEFAULT_PROVINCE_NAME
   locationNames.municipality = ''
   locationNames.barangay = ''
   
@@ -597,23 +420,21 @@ const resetForm = () => {
     shopProfilePreview.value = null
   }
   
-  // Reset shop location
-  shopLocation.latitude = null
-  shopLocation.longitude = null
-  shopLocation.useCurrentLocation = false
-  manualLatitude.value = ''
-  manualLongitude.value = ''
-  locationError.value = ''
-  showLocationSection.value = false
-  
-  // Destroy map
-  destroyMap()
+  // Reset document previews
+  Object.keys(documentPreviews).forEach(key => {
+    const previewKey = key as keyof typeof documentPreviews
+    if (documentPreviews[previewKey]) {
+      URL.revokeObjectURL(documentPreviews[previewKey]!)
+      documentPreviews[previewKey] = null
+    }
+  })
   
   uploadProgress.value = {
     governmentId: false,
     birTin: false,
     dtiOrSec: false,
     fdaCertificate: false,
+    businessPermit: false,
   }
   
   validationErrors.value = []
@@ -636,43 +457,7 @@ watch(() => props.isOpen, (open) => {
   }
 })
 
-watch(() => form.region, async (regionCode) => {
-  // Clear child selections
-  form.province = ''
-  form.municipality = ''
-  form.barangay = ''
-  form.zipCode = ''
-  locationNames.province = ''
-  locationNames.municipality = ''
-  locationNames.barangay = ''
-  provinces.value = []
-  municipalities.value = []
-  barangays.value = []
-  
-  // Set region name
-  const selectedRegion = regions.value.find(r => r.code === regionCode)
-  locationNames.region = selectedRegion?.name || ''
-  
-  if (regionCode) await refreshProvinces(regionCode)
-})
-
-watch(() => form.province, async (provinceCode) => {
-  // Clear child selections
-  form.municipality = ''
-  form.barangay = ''
-  form.zipCode = ''
-  locationNames.municipality = ''
-  locationNames.barangay = ''
-  municipalities.value = []
-  barangays.value = []
-  
-  // Set province name
-  const selectedProvince = provinces.value.find(p => p.code === provinceCode)
-  locationNames.province = selectedProvince?.name || ''
-  
-  if (provinceCode) await refreshMunicipalities(provinceCode)
-})
-
+// Since region and province are locked, we only need municipality watcher
 watch(() => form.municipality, async (municipalityCode) => {
   // Clear child selections
   form.barangay = ''
@@ -687,12 +472,12 @@ watch(() => form.municipality, async (municipalityCode) => {
   if (municipalityCode) await refreshBarangays(municipalityCode)
 })
 
-watch(() => form.barangay, async (barangayCode) => {
-  // Set barangay name
-  const selectedBarangay = barangays.value.find(b => b.code === barangayCode)
-  locationNames.barangay = selectedBarangay?.name || barangayCode || ''
+watch(() => form.barangay, async (barangayName) => {
+  // Set barangay name - form.barangay stores the name directly
+  const selectedBarangay = barangays.value.find(b => b.name === barangayName)
+  locationNames.barangay = selectedBarangay?.name || barangayName || ''
   
-  if (form.municipality && barangayCode && locationNames.barangay) {
+  if (form.municipality && barangayName && locationNames.barangay) {
     try {
       const zip = await locationStore.fetchZipCode(form.municipality, locationNames.barangay)
       if (zip) form.zipCode = zip
@@ -709,12 +494,33 @@ watch(() => sellerStore.submitSuccess, (success) => {
   }
 })
 
+// Watch for modal opening to fetch cities for Oriental Mindoro
+watch(() => props.isOpen, async (isOpen) => {
+  if (isOpen && municipalities.value.length === 0) {
+    try {
+      console.log('[SellerApplication] Loading cities for Oriental Mindoro...');
+      const cities = await locationStore.fetchCities(DEFAULT_PROVINCE_CODE);
+      municipalities.value = cities;
+      console.log('[SellerApplication] Loaded cities:', cities);
+    } catch (error) {
+      console.error('[SellerApplication] Failed to load cities:', error);
+    }
+  }
+});
+
 // Cleanup on unmount
 onUnmounted(() => {
-  destroyMap()
   if (shopProfilePreview.value) {
     URL.revokeObjectURL(shopProfilePreview.value)
   }
+  
+  // Cleanup document previews
+  Object.keys(documentPreviews).forEach(key => {
+    const previewKey = key as keyof typeof documentPreviews
+    if (documentPreviews[previewKey]) {
+      URL.revokeObjectURL(documentPreviews[previewKey]!)
+    }
+  })
 })
 </script>
 
@@ -753,6 +559,7 @@ onUnmounted(() => {
               <li>Government-issued ID (National ID, Driver's License, Passport, or UMID)</li>
               <li>BIR TIN Registration (scan or photo)</li>
               <li>DTI or SEC Registration (scan or photo)</li>
+              <li>Business Permit (scan or photo)</li>
               <li>FDA Certificate (optional, for food/health products)</li>
             </ul>
             <p><strong>Note:</strong> PDF uploads are accepted for business documents.</p>
@@ -780,34 +587,44 @@ onUnmounted(() => {
             </div>
 
             <div class="address-grid">
+              <!-- Region (Locked to MIMAROPA) -->
               <div class="form-group">
-                <label for="region" class="form-label">Region *</label>
+                <label for="region" class="form-label">
+                  Region (Fixed) * 
+                  <LockClosedIcon class="lock-icon" />
+                </label>
                 <select
                   id="region"
                   v-model="form.region"
-                  class="form-input"
-                  :disabled="isSubmitting"
+                  class="form-input locked-field"
+                  disabled
                 >
-                  <option value="">Select region</option>
-                  <option v-for="region in regions" :key="region.code" :value="region.code">
-                    {{ region.name }}
-                  </option>
+                  <option :value="DEFAULT_REGION_CODE">{{ DEFAULT_REGION_NAME }}</option>
                 </select>
+                <small class="lock-description">
+                  <LockClosedIcon class="lock-text-icon" />
+                  Locked to {{ DEFAULT_REGION_NAME }} for this version
+                </small>
               </div>
 
+              <!-- Province (Locked to Oriental Mindoro) -->
               <div class="form-group">
-                <label for="province" class="form-label">Province *</label>
+                <label for="province" class="form-label">
+                  Province (Fixed) * 
+                  <LockClosedIcon class="lock-icon" />
+                </label>
                 <select
                   id="province"
                   v-model="form.province"
-                  class="form-input"
-                  :disabled="isSubmitting || !form.region"
+                  class="form-input locked-field"
+                  disabled
                 >
-                  <option value="">Select province</option>
-                  <option v-for="province in provinces" :key="province.code" :value="province.code">
-                    {{ province.name }}
-                  </option>
+                  <option :value="DEFAULT_PROVINCE_CODE">{{ DEFAULT_PROVINCE_NAME }}</option>
                 </select>
+                <small class="lock-description">
+                  <LockClosedIcon class="lock-text-icon" />
+                  Locked to {{ DEFAULT_PROVINCE_NAME }} for this version
+                </small>
               </div>
 
               <div class="form-group">
@@ -921,104 +738,6 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Shop Location Section (Optional) -->
-          <div class="form-section location-section">
-            <div class="section-header-toggle">
-              <h3>
-                <MapPinIcon class="section-icon" />
-                Shop Location (Optional)
-              </h3>
-              <button 
-                type="button" 
-                @click="toggleLocationSection" 
-                class="toggle-btn"
-                :disabled="isSubmitting"
-              >
-                {{ showLocationSection ? 'Hide' : 'Add Location' }}
-              </button>
-            </div>
-            <p class="section-description">
-              Add your shop's exact location to help customers find you on the map. 
-              Your shop will appear on the "Nearby Shops" page for customers looking for local stores.
-            </p>
-
-            <div v-if="showLocationSection" class="location-content">
-              <!-- Location Actions -->
-              <div class="location-actions">
-                <button 
-                  type="button" 
-                  @click="getCurrentLocation" 
-                  class="btn btn-secondary location-btn"
-                  :disabled="isSubmitting || isGettingLocation"
-                >
-                  <MapPinIcon class="btn-icon" />
-                  {{ isGettingLocation ? 'Getting Location...' : 'Use My Current Location' }}
-                </button>
-                
-                <span class="divider-text">or enter coordinates manually</span>
-                
-                <div class="manual-coords">
-                  <div class="coord-input-group">
-                    <label>Latitude</label>
-                    <input
-                      v-model="manualLatitude"
-                      type="text"
-                      placeholder="e.g., 14.5995"
-                      class="coord-input"
-                      :disabled="isSubmitting"
-                    />
-                  </div>
-                  <div class="coord-input-group">
-                    <label>Longitude</label>
-                    <input
-                      v-model="manualLongitude"
-                      type="text"
-                      placeholder="e.g., 120.9842"
-                      class="coord-input"
-                      :disabled="isSubmitting"
-                    />
-                  </div>
-                  <button 
-                    type="button" 
-                    @click="applyManualCoordinates" 
-                    class="btn btn-sm btn-outline"
-                    :disabled="isSubmitting || !manualLatitude || !manualLongitude"
-                  >
-                    Apply
-                  </button>
-                </div>
-              </div>
-
-              <!-- Location Error -->
-              <div v-if="locationError" class="location-error">
-                <ExclamationTriangleIcon class="error-icon" />
-                {{ locationError }}
-              </div>
-
-              <!-- Map Container -->
-              <div class="map-wrapper">
-                <div ref="mapContainer" class="map-container"></div>
-                <p class="map-hint">Click on the map or drag the marker to set your shop's exact location</p>
-              </div>
-
-              <!-- Current Location Display -->
-              <div v-if="hasLocation" class="location-display">
-                <div class="location-coords">
-                  <span class="coord-label">Coordinates:</span>
-                  <span class="coord-value">{{ shopLocation.latitude }}, {{ shopLocation.longitude }}</span>
-                </div>
-                <button 
-                  type="button" 
-                  @click="removeLocation" 
-                  class="btn btn-sm btn-danger"
-                  :disabled="isSubmitting"
-                >
-                  Remove Location
-                </button>
-              </div>
-            </div>
-          </div>
-
           <!-- Document Uploads -->
           <div class="form-section">
             <h3>Required Documents</h3>
@@ -1043,9 +762,13 @@ onUnmounted(() => {
               </div>
               
               <div v-else class="file-preview">
+                <div v-if="documentPreviews.governmentId" class="image-preview">
+                  <img :src="documentPreviews.governmentId" alt="Government ID Preview" class="preview-image" />
+                </div>
                 <div class="file-info">
                   <span class="file-name">{{ getFileName('governmentId') }}</span>
                   <span class="file-size">{{ getFileSize('governmentId') }}</span>
+                  <span v-if="isPdfFile(form.governmentId)" class="file-type-badge">PDF</span>
                 </div>
                 <button 
                   type="button" 
@@ -1078,9 +801,13 @@ onUnmounted(() => {
               </div>
               
               <div v-else class="file-preview">
+                <div v-if="documentPreviews.birTin" class="image-preview">
+                  <img :src="documentPreviews.birTin" alt="BIR TIN Preview" class="preview-image" />
+                </div>
                 <div class="file-info">
                   <span class="file-name">{{ getFileName('birTin') }}</span>
                   <span class="file-size">{{ getFileSize('birTin') }}</span>
+                  <span v-if="isPdfFile(form.birTin)" class="file-type-badge">PDF</span>
                 </div>
                 <button 
                   type="button" 
@@ -1113,9 +840,13 @@ onUnmounted(() => {
               </div>
               
               <div v-else class="file-preview">
+                <div v-if="documentPreviews.dtiOrSec" class="image-preview">
+                  <img :src="documentPreviews.dtiOrSec" alt="DTI/SEC Preview" class="preview-image" />
+                </div>
                 <div class="file-info">
                   <span class="file-name">{{ getFileName('dtiOrSec') }}</span>
                   <span class="file-size">{{ getFileSize('dtiOrSec') }}</span>
+                  <span v-if="isPdfFile(form.dtiOrSec)" class="file-type-badge">PDF</span>
                 </div>
                 <button 
                   type="button" 
@@ -1148,13 +879,58 @@ onUnmounted(() => {
               </div>
               
               <div v-else class="file-preview">
+                <div v-if="documentPreviews.fdaCertificate" class="image-preview">
+                  <img :src="documentPreviews.fdaCertificate" alt="FDA Certificate Preview" class="preview-image" />
+                </div>
                 <div class="file-info">
                   <span class="file-name">{{ getFileName('fdaCertificate') }}</span>
                   <span class="file-size">{{ getFileSize('fdaCertificate') }}</span>
+                  <span v-if="isPdfFile(form.fdaCertificate)" class="file-type-badge">PDF</span>
                 </div>
                 <button 
                   type="button" 
                   @click="removeFile('fdaCertificate')"
+                  :disabled="isSubmitting"
+                  class="remove-file-btn"
+                >
+                  <XMarkIcon class="remove-icon" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Business Permit (Required) -->
+          <div class="form-row">
+            <div class="file-upload-section">
+              <label class="file-upload-label">
+                Business Permit <span class="required">*</span> <span class="format-hint">(PNG, JPG, or PDF, max 10MB)</span>
+              </label>
+              
+              <div v-if="!form.businessPermit" class="file-dropzone" @click="businessPermitInput?.click()">
+                <DocumentArrowUpIcon class="upload-icon" />
+                <span>Click to upload Business Permit</span>
+                <input
+                  ref="businessPermitInput"
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.pdf"
+                  @change="handleFileSelect($event, 'businessPermit')"
+                  class="file-input"
+                  :disabled="isSubmitting"
+                />
+              </div>
+              
+              <div v-else class="file-preview">
+                <div v-if="documentPreviews.businessPermit" class="image-preview">
+                  <img :src="documentPreviews.businessPermit" alt="Business Permit Preview" class="preview-image" />
+                </div>
+                <div class="file-info">
+                  <span class="file-name">{{ getFileName('businessPermit') }}</span>
+                  <span class="file-size">{{ getFileSize('businessPermit') }}</span>
+                  <span v-if="isPdfFile(form.businessPermit)" class="file-type-badge">PDF</span>
+                </div>
+                <button 
+                  type="button" 
+                  @click="removeFile('businessPermit')"
                   :disabled="isSubmitting"
                   class="remove-file-btn"
                 >
@@ -1978,5 +1754,66 @@ onUnmounted(() => {
     flex-direction: column;
     text-align: center;
   }
+}
+
+/* Lock Icon Styles */
+.lock-icon {
+  width: 1rem;
+  height: 1rem;
+  color: var(--text-secondary);
+  margin-left: 0.25rem;
+  vertical-align: middle;
+}
+
+.lock-text-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  color: var(--text-secondary);
+  margin-right: 0.25rem;
+  vertical-align: middle;
+}
+
+.locked-field {
+  background-color: var(--bg-tertiary) !important;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.lock-description {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+  display: flex;
+  align-items: center;
+  font-style: italic;
+}
+
+/* Image Preview Styles */
+.image-preview {
+  margin-bottom: 0.75rem;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 2px solid var(--border-color);
+}
+
+.preview-image {
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  max-height: 200px;
+  object-fit: contain;
+  display: block;
+  background-color: var(--bg-tertiary);
+}
+
+.file-type-badge {
+  background-color: var(--primary-color);
+  color: white;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-left: 0.5rem;
 }
 </style>

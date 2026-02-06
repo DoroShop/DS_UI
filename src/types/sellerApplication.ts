@@ -18,6 +18,8 @@ export interface SellerApplication {
   dtiOrSecPublicId?: string
   fdaCertificateUrl?: string
   fdaCertificatePublicId?: string
+  businessPermitUrl?: string
+  businessPermitPublicId?: string
   status: 'not_applied' | 'pending' | 'approved' | 'rejected'
   rejectionReason?: string
   submittedAt?: string
@@ -39,6 +41,7 @@ export interface SellerApplicationForm {
   birTin: File | null
   dtiOrSec: File | null
   fdaCertificate?: File | null
+  businessPermit: File | null
 }
 
 export interface SellerApplicationResponse {

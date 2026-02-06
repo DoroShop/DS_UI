@@ -64,7 +64,10 @@ const applicationMarker = ref<L.Marker | null>(null);
 // Data
 const sellers = computed(() => adminStore.sellers || []);
 const applications = computed(() => adminStore.pendingApplications || []);
+const historyApplications = computed(() => adminStore.applicationHistory || []);
+const historyPagination = computed(() => adminStore.applicationHistoryPagination);
 const pagination = computed(() => adminStore.sellersPagination);
+const historyStatusFilter = ref('all');
 
 // Filter options
 const sellerStatusOptions = [
@@ -76,6 +79,12 @@ const sellerStatusOptions = [
 const applicationStatusOptions = [
   { value: 'all', label: 'All Applications' },
   { value: 'pending', label: 'Pending' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'rejected', label: 'Rejected' },
+];
+
+const historyStatusOptions = [
+  { value: 'all', label: 'All History' },
   { value: 'approved', label: 'Approved' },
   { value: 'rejected', label: 'Rejected' },
 ];
@@ -117,6 +126,14 @@ const fetchData = async () => {
   try {
     if (activeTab.value === 'applications') {
       await adminStore.fetchPendingApplications();
+    } else if (activeTab.value === 'history') {
+      const filters: any = {
+        page: historyPagination.value.page,
+        limit: historyPagination.value.limit
+      };
+      if (searchQuery.value) filters.search = searchQuery.value;
+      if (historyStatusFilter.value !== 'all') filters.status = historyStatusFilter.value;
+      await adminStore.fetchApplicationHistory(filters);
     } else {
       const filters: any = {
         page: pagination.value.page,
@@ -158,6 +175,10 @@ watch([selectedStatus, activeTab], () => {
   fetchData();
 });
 
+watch(historyStatusFilter, () => {
+  fetchData();
+});
+
 // Format date
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
@@ -188,38 +209,44 @@ const previewDocumentType = ref('');
 const isPdfUrl = (url: string | undefined | null): boolean => {
   if (!url) return false;
   const lowerUrl = url.toLowerCase();
-  return lowerUrl.includes('.pdf') || lowerUrl.includes('/raw/upload/');
+  // Check for .pdf extension or Cloudinary raw upload (used for PDFs)
+  return lowerUrl.includes('.pdf') || (lowerUrl.includes('/raw/upload/') && !lowerUrl.match(/\.(jpg|jpeg|png|webp|gif)$/i));
 };
 
 /**
- * Fix document URL for proper access
- * - Convert /image/upload/ to /raw/upload/ for PDFs
- * - Remove fl_attachment flag if present (causes 401 errors)
+ * Get the direct download URL for a document (for actual downloads only)
  */
-const fixDocumentUrl = (url: string | undefined | null): string => {
+const getDirectDocUrl = (url: string | undefined | null): string => {
   if (!url) return '';
-  
   let fixedUrl = url;
-  
-  // If it's a PDF but using image/upload, convert to raw/upload
-  if (url.toLowerCase().includes('.pdf') && url.includes('/image/upload/')) {
+  // For PDFs, ensure raw delivery type
+  if (fixedUrl.toLowerCase().includes('.pdf') && fixedUrl.includes('/image/upload/')) {
     fixedUrl = fixedUrl.replace('/image/upload/', '/raw/upload/');
   }
-  
-  // Remove fl_attachment flag as it can cause 401 errors in some browsers
-  if (fixedUrl.includes('/fl_attachment/')) {
-    fixedUrl = fixedUrl.replace('/fl_attachment/', '/');
-  }
-  
-  // Remove fl_attachment if it's part of other transformations
+  // Remove fl_attachment if present
+  fixedUrl = fixedUrl.replace('/fl_attachment/', '/');
   fixedUrl = fixedUrl.replace(/,?fl_attachment,?/g, '');
-  
   return fixedUrl;
 };
 
+/**
+ * Get the viewable URL for a document.
+ * - Images: direct Cloudinary URL
+ * - PDFs: Google Docs Viewer URL (renders inline without download)
+ */
+const getViewableUrl = (url: string | undefined | null): string => {
+  if (!url) return '';
+  const directUrl = getDirectDocUrl(url);
+  if (isPdfUrl(directUrl)) {
+    // Use Google Docs Viewer to render PDFs inline — avoids Cloudinary
+    // Content-Disposition: attachment header that forces downloads
+    return `https://docs.google.com/gview?url=${encodeURIComponent(directUrl)}&embedded=true`;
+  }
+  return directUrl;
+};
+
 const openDocumentPreview = (url: string, type: string) => {
-  // Fix the URL before previewing
-  previewDocumentUrl.value = fixDocumentUrl(url);
+  previewDocumentUrl.value = url; // store the original URL
   previewDocumentType.value = type;
   showDocumentPreview.value = true;
 };
@@ -228,6 +255,43 @@ const closeDocumentPreview = () => {
   showDocumentPreview.value = false;
   previewDocumentUrl.value = '';
   previewDocumentType.value = '';
+};
+
+// Download document properly (fetch + blob to bypass cross-origin restrictions)
+const isDownloading = ref(false);
+const downloadDocument = async (url: string | undefined | null, docName: string) => {
+  if (!url) return;
+  isDownloading.value = true;
+  try {
+    const directUrl = getDirectDocUrl(url);
+    const response = await fetch(directUrl);
+    const blob = await response.blob();
+    
+    // Determine file extension from URL or content type
+    const contentType = response.headers.get('content-type') || '';
+    let extension = '.pdf';
+    if (contentType.includes('image/jpeg') || directUrl.match(/\.jpe?g$/i)) extension = '.jpg';
+    else if (contentType.includes('image/png') || directUrl.match(/\.png$/i)) extension = '.png';
+    else if (contentType.includes('image/webp') || directUrl.match(/\.webp$/i)) extension = '.webp';
+    else if (contentType.includes('application/pdf') || directUrl.match(/\.pdf$/i)) extension = '.pdf';
+    
+    const fileName = `${docName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_')}${extension}`;
+    
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  } catch (error) {
+    console.error('Download failed:', error);
+    // Fallback: open in new tab
+    window.open(getDirectDocUrl(url), '_blank');
+  } finally {
+    isDownloading.value = false;
+  }
 };
 
 // Get status badge
@@ -423,12 +487,31 @@ const handlePageChange = (page: number) => {
   fetchData();
 };
 
+const handleHistoryPageChange = (page: number) => {
+  adminStore.applicationHistoryPagination.page = page;
+  fetchData();
+};
+
 const totalPages = computed(() => Math.ceil(pagination.value.total / pagination.value.limit));
+const historyTotalPages = computed(() => historyPagination.value.totalPages);
 
 // Pending applications count
 const pendingApplicationsCount = computed(() => {
   return applications.value.filter((app: any) => app.status === 'pending').length;
 });
+
+// Format date with time
+const formatDateTime = (dateString: string) => {
+  if (!dateString) return 'N/A';
+  const date = new Date(dateString);
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+};
 
 onMounted(async () => {
   // Ensure auth is ready
@@ -467,6 +550,14 @@ onMounted(async () => {
           {{ pendingApplicationsCount }}
         </span>
       </button>
+      <button 
+        class="tab-btn"
+        :class="{ 'active': activeTab === 'history' }"
+        @click="activeTab = 'history'"
+      >
+        <ClockIcon class="tab-icon" />
+        History
+      </button>
     </div>
 
     <!-- Filters Section -->
@@ -476,7 +567,7 @@ onMounted(async () => {
         <input 
           v-model="searchQuery"
           type="text" 
-          :placeholder="activeTab === 'sellers' ? 'Search sellers...' : 'Search applications...'"
+          :placeholder="activeTab === 'sellers' ? 'Search sellers...' : activeTab === 'history' ? 'Search history...' : 'Search applications...'"
         />
       </div>
       
@@ -491,6 +582,16 @@ onMounted(async () => {
           </option>
         </select>
         
+        <select 
+          v-else-if="activeTab === 'history'"
+          v-model="historyStatusFilter" 
+          class="filter-select"
+        >
+          <option v-for="option in historyStatusOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+
         <select 
           v-else
           v-model="selectedStatus" 
@@ -596,7 +697,7 @@ onMounted(async () => {
     </template>
 
     <!-- Applications Tab Content -->
-    <template v-else>
+    <template v-else-if="activeTab === 'applications'">
       <div v-if="applications.length > 0" class="applications-list">
         <div 
           v-for="app in applications" 
@@ -735,6 +836,46 @@ onMounted(async () => {
                 </button>
                 <span v-else class="no-document">Not Submitted</span>
               </div>
+
+              <!-- Business Permit -->
+              <div class="document-card" :class="{ 'has-document': app.sellerApplication?.businessPermitUrl }">
+                <div class="document-icon-wrapper permit">
+                  <DocumentCheckIcon class="document-type-icon" />
+                </div>
+                <div class="document-info">
+                  <span class="document-label">Business Permit</span>
+                  <span class="document-desc">Municipal/City Business Permit</span>
+                </div>
+                <button 
+                  v-if="app.sellerApplication?.businessPermitUrl"
+                  class="view-doc-btn"
+                  @click="openDocumentPreview(app.sellerApplication.businessPermitUrl, 'Business Permit')"
+                >
+                  <EyeIcon class="btn-icon" />
+                  View
+                </button>
+                <span v-else class="no-document">Not Submitted</span>
+              </div>
+
+              <!-- FDA Certificate (Optional) -->
+              <div class="document-card" :class="{ 'has-document': app.sellerApplication?.fdaCertificateUrl }">
+                <div class="document-icon-wrapper fda">
+                  <ShieldCheckIcon class="document-type-icon" />
+                </div>
+                <div class="document-info">
+                  <span class="document-label">FDA Certificate</span>
+                  <span class="document-desc">Optional for food/health products</span>
+                </div>
+                <button 
+                  v-if="app.sellerApplication?.fdaCertificateUrl"
+                  class="view-doc-btn"
+                  @click="openDocumentPreview(app.sellerApplication.fdaCertificateUrl, 'FDA Certificate')"
+                >
+                  <EyeIcon class="btn-icon" />
+                  View
+                </button>
+                <span v-else class="no-document">Optional</span>
+              </div>
             </div>
           </div>
           
@@ -742,30 +883,18 @@ onMounted(async () => {
             <div class="app-documents-count">
               <DocumentTextIcon class="doc-icon" />
               <span>
-                {{ [app.sellerApplication?.governmentIdUrl, app.sellerApplication?.birTinUrl, app.sellerApplication?.dtiOrSecUrl].filter(Boolean).length }} of 3 documents submitted
+                {{ 
+                  [
+                    app.sellerApplication?.governmentIdUrl, 
+                    app.sellerApplication?.birTinUrl, 
+                    app.sellerApplication?.dtiOrSecUrl,
+                    app.sellerApplication?.businessPermitUrl,
+                    app.sellerApplication?.fdaCertificateUrl
+                  ].filter(Boolean).length 
+                }} of 5 documents submitted
               </span>
             </div>
 
-            <!-- FDA Certificate (Optional) -->
-            <div class="document-card" :class="{ 'has-document': app.sellerApplication?.fdaCertificateUrl }">
-              <div class="document-icon-wrapper fda">
-                <ShieldCheckIcon class="document-type-icon" />
-              </div>
-              <div class="document-info">
-                <span class="document-label">FDA Certificate</span>
-                <span class="document-desc">Optional for food/health products</span>
-              </div>
-              <button 
-                v-if="app.sellerApplication?.fdaCertificateUrl"
-                class="view-doc-btn"
-                @click="openDocumentPreview(app.sellerApplication.fdaCertificateUrl, 'FDA Certificate')"
-              >
-                <EyeIcon class="btn-icon" />
-                View
-              </button>
-              <span v-else class="no-document">Optional</span>
-            </div>
-            
             <div class="app-actions">
               <button 
                 class="action-btn preview"
@@ -802,6 +931,208 @@ onMounted(async () => {
         <h3>No applications found</h3>
         <p v-if="selectedStatus === 'pending'">All applications have been reviewed!</p>
         <p v-else>Try adjusting your search or filters</p>
+      </div>
+    </template>
+
+    <!-- History Tab Content -->
+    <template v-else-if="activeTab === 'history'">
+      <div v-if="historyApplications.length > 0" class="applications-list">
+        <div 
+          v-for="app in historyApplications" 
+          :key="app._id"
+          class="application-card history-card"
+          :class="{ 'approved-card': app.sellerApplication?.status === 'approved', 'rejected-card': app.sellerApplication?.status === 'rejected' }"
+        >
+          <div class="app-header">
+            <div class="app-avatar" :class="{ 'approved-avatar': app.sellerApplication?.status === 'approved', 'rejected-avatar': app.sellerApplication?.status === 'rejected' }">
+              {{ app.sellerApplication?.shopName?.charAt(0) || app.name?.charAt(0) || 'A' }}
+            </div>
+            <div class="app-info">
+              <h3 class="app-name">{{ app.sellerApplication?.shopName || 'Shop Name Not Set' }}</h3>
+              <span class="app-user">{{ app.name || 'Unknown' }} • {{ app.email }}</span>
+            </div>
+            <span :class="`status-badge ${getStatusBadge(app.sellerApplication?.status || 'pending').class}`">
+              {{ getStatusBadge(app.sellerApplication?.status || 'pending').label }}
+            </span>
+          </div>
+          
+          <div class="app-details history-details">
+            <div class="detail-item">
+              <span class="detail-label">
+                <BuildingStorefrontIcon class="detail-icon" />
+                Shop Name
+              </span>
+              <span class="detail-value">{{ app.sellerApplication?.shopName || 'N/A' }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">
+                <MapPinIcon class="detail-icon" />
+                Shop Address
+              </span>
+              <span class="detail-value">{{ app.sellerApplication?.shopAddress || 'N/A' }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">
+                <ClockIcon class="detail-icon" />
+                Submitted
+              </span>
+              <span class="detail-value">{{ formatDateTime(app.sellerApplication?.submittedAt) }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">
+                <CheckCircleIcon class="detail-icon" v-if="app.sellerApplication?.status === 'approved'" />
+                <XCircleIcon class="detail-icon" v-else />
+                Reviewed
+              </span>
+              <span class="detail-value">{{ formatDateTime(app.sellerApplication?.reviewedAt) }}</span>
+            </div>
+            <div class="detail-item" v-if="app.sellerApplication?.reviewedBy">
+              <span class="detail-label">Reviewed By</span>
+              <span class="detail-value">{{ app.sellerApplication.reviewedBy.name || app.sellerApplication.reviewedBy.email || 'Admin' }}</span>
+            </div>
+            <div class="detail-item full-width" v-if="app.sellerApplication?.status === 'rejected' && app.sellerApplication?.rejectionReason">
+              <span class="detail-label rejection-label">
+                <XCircleIcon class="detail-icon" />
+                Rejection Reason
+              </span>
+              <span class="detail-value rejection-reason">{{ app.sellerApplication.rejectionReason }}</span>
+            </div>
+          </div>
+          
+          <!-- Documents Section -->
+          <div class="documents-preview-section">
+            <h4 class="documents-title">
+              <DocumentCheckIcon class="section-title-icon" />
+              Submitted Documents
+            </h4>
+            <div class="documents-grid">
+              <div class="document-card" :class="{ 'has-document': app.sellerApplication?.governmentIdUrl }">
+                <div class="document-icon-wrapper">
+                  <IdentificationIcon class="document-type-icon" />
+                </div>
+                <div class="document-info">
+                  <span class="document-label">Government ID</span>
+                </div>
+                <button 
+                  v-if="app.sellerApplication?.governmentIdUrl"
+                  class="view-doc-btn"
+                  @click="openDocumentPreview(app.sellerApplication.governmentIdUrl, 'Government ID')"
+                >
+                  <EyeIcon class="btn-icon" />
+                  View
+                </button>
+                <span v-else class="no-document">Not Submitted</span>
+              </div>
+
+              <div class="document-card" :class="{ 'has-document': app.sellerApplication?.birTinUrl }">
+                <div class="document-icon-wrapper bir">
+                  <ShieldCheckIcon class="document-type-icon" />
+                </div>
+                <div class="document-info">
+                  <span class="document-label">BIR Registration</span>
+                </div>
+                <button 
+                  v-if="app.sellerApplication?.birTinUrl"
+                  class="view-doc-btn"
+                  @click="openDocumentPreview(app.sellerApplication.birTinUrl, 'BIR Registration')"
+                >
+                  <EyeIcon class="btn-icon" />
+                  View
+                </button>
+                <span v-else class="no-document">Not Submitted</span>
+              </div>
+
+              <div class="document-card" :class="{ 'has-document': app.sellerApplication?.dtiOrSecUrl }">
+                <div class="document-icon-wrapper dti">
+                  <DocumentTextIcon class="document-type-icon" />
+                </div>
+                <div class="document-info">
+                  <span class="document-label">DTI/SEC</span>
+                </div>
+                <button 
+                  v-if="app.sellerApplication?.dtiOrSecUrl"
+                  class="view-doc-btn"
+                  @click="openDocumentPreview(app.sellerApplication.dtiOrSecUrl, 'DTI/SEC Registration')"
+                >
+                  <EyeIcon class="btn-icon" />
+                  View
+                </button>
+                <span v-else class="no-document">Not Submitted</span>
+              </div>
+
+              <div v-if="app.sellerApplication?.businessPermitUrl" class="document-card has-document">
+                <div class="document-icon-wrapper permit">
+                  <DocumentCheckIcon class="document-type-icon" />
+                </div>
+                <div class="document-info">
+                  <span class="document-label">Business Permit</span>
+                </div>
+                <button 
+                  class="view-doc-btn"
+                  @click="openDocumentPreview(app.sellerApplication.businessPermitUrl, 'Business Permit')"
+                >
+                  <EyeIcon class="btn-icon" />
+                  View
+                </button>
+              </div>
+
+              <div v-if="app.sellerApplication?.fdaCertificateUrl" class="document-card has-document">
+                <div class="document-icon-wrapper fda">
+                  <ShieldCheckIcon class="document-type-icon" />
+                </div>
+                <div class="document-info">
+                  <span class="document-label">FDA Certificate</span>
+                </div>
+                <button 
+                  class="view-doc-btn"
+                  @click="openDocumentPreview(app.sellerApplication.fdaCertificateUrl, 'FDA Certificate')"
+                >
+                  <EyeIcon class="btn-icon" />
+                  View
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="app-footer">
+            <div class="app-actions">
+              <button 
+                class="action-btn preview"
+                @click="openDetailModal(app, 'application')"
+              >
+                <EyeIcon class="btn-icon" />
+                View Full Details
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div v-else class="empty-state">
+        <ClockIcon class="empty-icon" />
+        <h3>No application history</h3>
+        <p>Reviewed applications will appear here</p>
+      </div>
+
+      <!-- History Pagination -->
+      <div v-if="historyTotalPages > 1" class="pagination">
+        <button 
+          class="page-btn"
+          :disabled="historyPagination.page === 1"
+          @click="handleHistoryPageChange(historyPagination.page - 1)"
+        >
+          Previous
+        </button>
+        <div class="page-info">
+          Page {{ historyPagination.page }} of {{ historyTotalPages }}
+        </div>
+        <button 
+          class="page-btn"
+          :disabled="historyPagination.page === historyTotalPages"
+          @click="handleHistoryPageChange(historyPagination.page + 1)"
+        >
+          Next
+        </button>
       </div>
     </template>
 
@@ -973,21 +1304,26 @@ onMounted(async () => {
                   </div>
                   <div class="modal-doc-content">
                     <template v-if="selectedApplication.sellerApplication?.governmentIdUrl">
-                      <img 
-                        :src="selectedApplication.sellerApplication.governmentIdUrl" 
-                        alt="Government ID"
-                        class="doc-preview-img"
-                        @click="openDocumentPreview(selectedApplication.sellerApplication.governmentIdUrl, 'Government ID')"
-                      />
+                      <template v-if="isPdfUrl(selectedApplication.sellerApplication.governmentIdUrl)">
+                        <div class="pdf-preview-placeholder" @click="openDocumentPreview(selectedApplication.sellerApplication.governmentIdUrl, 'Government ID')">
+                          <DocumentTextIcon class="pdf-placeholder-icon" />
+                          <span class="pdf-label">PDF Document</span>
+                          <span class="pdf-click-hint">Click to view inline</span>
+                        </div>
+                      </template>
+                      <template v-else>
+                        <img 
+                          :src="selectedApplication.sellerApplication.governmentIdUrl" 
+                          alt="Government ID"
+                          class="doc-preview-img"
+                          @click="openDocumentPreview(selectedApplication.sellerApplication.governmentIdUrl, 'Government ID')"
+                        />
+                      </template>
                       <div class="doc-actions">
-                        <button class="doc-action-btn" @click="openDocumentPreview(selectedApplication.sellerApplication.governmentIdUrl, 'Government ID')">
+                        <button class="doc-action-btn view" @click="openDocumentPreview(selectedApplication.sellerApplication.governmentIdUrl, 'Government ID')">
                           <EyeIcon class="action-icon" />
-                          View Full
+                          View
                         </button>
-                        <a :href="selectedApplication.sellerApplication.governmentIdUrl" target="_blank" class="doc-action-btn external">
-                          <ArrowTopRightOnSquareIcon class="action-icon" />
-                          Open
-                        </a>
                       </div>
                     </template>
                     <div v-else class="no-doc-placeholder">
@@ -1010,15 +1346,13 @@ onMounted(async () => {
                   </div>
                   <div class="modal-doc-content">
                     <template v-if="selectedApplication.sellerApplication?.birTinUrl">
-                      <!-- PDF Preview for BIR -->
                       <template v-if="isPdfUrl(selectedApplication.sellerApplication.birTinUrl)">
                         <div class="pdf-preview-placeholder" @click="openDocumentPreview(selectedApplication.sellerApplication.birTinUrl, 'BIR Registration (TIN)')">
                           <DocumentTextIcon class="pdf-placeholder-icon" />
                           <span class="pdf-label">PDF Document</span>
-                          <span class="pdf-click-hint">Click to view</span>
+                          <span class="pdf-click-hint">Click to view inline</span>
                         </div>
                       </template>
-                      <!-- Image Preview for BIR -->
                       <template v-else>
                         <img 
                           :src="selectedApplication.sellerApplication.birTinUrl" 
@@ -1028,14 +1362,10 @@ onMounted(async () => {
                         />
                       </template>
                       <div class="doc-actions">
-                        <button class="doc-action-btn" @click="openDocumentPreview(selectedApplication.sellerApplication.birTinUrl, 'BIR Registration (TIN)')">
+                        <button class="doc-action-btn view" @click="openDocumentPreview(selectedApplication.sellerApplication.birTinUrl, 'BIR Registration (TIN)')">
                           <EyeIcon class="action-icon" />
-                          View Full
+                          View
                         </button>
-                        <a :href="selectedApplication.sellerApplication.birTinUrl" target="_blank" class="doc-action-btn external">
-                          <ArrowTopRightOnSquareIcon class="action-icon" />
-                          Open
-                        </a>
                       </div>
                     </template>
                     <div v-else class="no-doc-placeholder">
@@ -1058,15 +1388,13 @@ onMounted(async () => {
                   </div>
                   <div class="modal-doc-content">
                     <template v-if="selectedApplication.sellerApplication?.dtiOrSecUrl">
-                      <!-- PDF Preview for DTI/SEC -->
                       <template v-if="isPdfUrl(selectedApplication.sellerApplication.dtiOrSecUrl)">
                         <div class="pdf-preview-placeholder" @click="openDocumentPreview(selectedApplication.sellerApplication.dtiOrSecUrl, 'DTI/SEC Registration')">
                           <DocumentTextIcon class="pdf-placeholder-icon" />
                           <span class="pdf-label">PDF Document</span>
-                          <span class="pdf-click-hint">Click to view</span>
+                          <span class="pdf-click-hint">Click to view inline</span>
                         </div>
                       </template>
-                      <!-- Image Preview for DTI/SEC -->
                       <template v-else>
                         <img 
                           :src="selectedApplication.sellerApplication.dtiOrSecUrl" 
@@ -1076,19 +1404,99 @@ onMounted(async () => {
                         />
                       </template>
                       <div class="doc-actions">
-                        <button class="doc-action-btn" @click="openDocumentPreview(selectedApplication.sellerApplication.dtiOrSecUrl, 'DTI/SEC Registration')">
+                        <button class="doc-action-btn view" @click="openDocumentPreview(selectedApplication.sellerApplication.dtiOrSecUrl, 'DTI/SEC Registration')">
                           <EyeIcon class="action-icon" />
-                          View Full
+                          View
                         </button>
-                        <a :href="selectedApplication.sellerApplication.dtiOrSecUrl" target="_blank" class="doc-action-btn external">
-                          <ArrowTopRightOnSquareIcon class="action-icon" />
-                          Open
-                        </a>
                       </div>
                     </template>
                     <div v-else class="no-doc-placeholder">
                       <PhotoIcon class="placeholder-icon" />
                       <span>Not Submitted</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Business Permit -->
+                <div class="modal-document-card" :class="{ 'submitted': selectedApplication.sellerApplication?.businessPermitUrl }">
+                  <div class="modal-doc-header">
+                    <div class="modal-doc-icon-wrap permit-doc">
+                      <DocumentCheckIcon class="modal-doc-icon" />
+                    </div>
+                    <div class="modal-doc-title">
+                      <span class="modal-doc-name">Business Permit</span>
+                      <span class="modal-doc-desc">Local Government Business Permit</span>
+                    </div>
+                  </div>
+                  <div class="modal-doc-content">
+                    <template v-if="selectedApplication.sellerApplication?.businessPermitUrl">
+                      <template v-if="isPdfUrl(selectedApplication.sellerApplication.businessPermitUrl)">
+                        <div class="pdf-preview-placeholder" @click="openDocumentPreview(selectedApplication.sellerApplication.businessPermitUrl, 'Business Permit')">
+                          <DocumentTextIcon class="pdf-placeholder-icon" />
+                          <span class="pdf-label">PDF Document</span>
+                          <span class="pdf-click-hint">Click to view inline</span>
+                        </div>
+                      </template>
+                      <template v-else>
+                        <img 
+                          :src="selectedApplication.sellerApplication.businessPermitUrl" 
+                          alt="Business Permit"
+                          class="doc-preview-img"
+                          @click="openDocumentPreview(selectedApplication.sellerApplication.businessPermitUrl, 'Business Permit')"
+                        />
+                      </template>
+                      <div class="doc-actions">
+                        <button class="doc-action-btn view" @click="openDocumentPreview(selectedApplication.sellerApplication.businessPermitUrl, 'Business Permit')">
+                          <EyeIcon class="action-icon" />
+                          View
+                        </button>
+                      </div>
+                    </template>
+                    <div v-else class="no-doc-placeholder">
+                      <PhotoIcon class="placeholder-icon" />
+                      <span>Not Submitted</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- FDA Certificate (Optional) -->
+                <div class="modal-document-card" :class="{ 'submitted': selectedApplication.sellerApplication?.fdaCertificateUrl, 'optional': !selectedApplication.sellerApplication?.fdaCertificateUrl }">
+                  <div class="modal-doc-header">
+                    <div class="modal-doc-icon-wrap fda-doc">
+                      <ShieldCheckIcon class="modal-doc-icon" />
+                    </div>
+                    <div class="modal-doc-title">
+                      <span class="modal-doc-name">FDA Certificate <span class="optional-tag">(Optional)</span></span>
+                      <span class="modal-doc-desc">Required for food/health products</span>
+                    </div>
+                  </div>
+                  <div class="modal-doc-content">
+                    <template v-if="selectedApplication.sellerApplication?.fdaCertificateUrl">
+                      <template v-if="isPdfUrl(selectedApplication.sellerApplication.fdaCertificateUrl)">
+                        <div class="pdf-preview-placeholder" @click="openDocumentPreview(selectedApplication.sellerApplication.fdaCertificateUrl, 'FDA Certificate')">
+                          <DocumentTextIcon class="pdf-placeholder-icon" />
+                          <span class="pdf-label">PDF Document</span>
+                          <span class="pdf-click-hint">Click to view inline</span>
+                        </div>
+                      </template>
+                      <template v-else>
+                        <img 
+                          :src="selectedApplication.sellerApplication.fdaCertificateUrl" 
+                          alt="FDA Certificate"
+                          class="doc-preview-img"
+                          @click="openDocumentPreview(selectedApplication.sellerApplication.fdaCertificateUrl, 'FDA Certificate')"
+                        />
+                      </template>
+                      <div class="doc-actions">
+                        <button class="doc-action-btn view" @click="openDocumentPreview(selectedApplication.sellerApplication.fdaCertificateUrl, 'FDA Certificate')">
+                          <EyeIcon class="action-icon" />
+                          View
+                        </button>
+                      </div>
+                    </template>
+                    <div v-else class="no-doc-placeholder">
+                      <PhotoIcon class="placeholder-icon" />
+                      <span>Not Submitted (Optional)</span>
                     </div>
                   </div>
                 </div>
@@ -1128,35 +1536,49 @@ onMounted(async () => {
       <div class="document-preview-modal" :class="{ 'pdf-mode': isPdfUrl(previewDocumentUrl) }">
         <div class="preview-modal-header">
           <h3>{{ previewDocumentType }}</h3>
-          <button class="close-btn" @click="closeDocumentPreview">
-            <XMarkIcon class="close-icon" />
-          </button>
+          <div class="preview-header-actions">
+            <span v-if="isPdfUrl(previewDocumentUrl)" class="preview-badge pdf-badge">PDF</span>
+            <span v-else class="preview-badge img-badge">IMAGE</span>
+            <button class="close-btn" @click="closeDocumentPreview">
+              <XMarkIcon class="close-icon" />
+            </button>
+          </div>
         </div>
         <div class="preview-modal-body">
-          <!-- PDF Preview -->
+          <!-- PDF Preview via Google Docs Viewer -->
           <template v-if="isPdfUrl(previewDocumentUrl)">
             <div class="pdf-viewer-container">
               <iframe 
-                :src="previewDocumentUrl" 
+                :src="getViewableUrl(previewDocumentUrl)" 
                 class="pdf-iframe"
                 frameborder="0"
+                allowfullscreen
+                title="PDF Document Preview"
               ></iframe>
-              <div class="pdf-fallback">
-                <DocumentTextIcon class="pdf-fallback-icon" />
-                <p>If the PDF doesn't load, click "Open in New Tab" below.</p>
-              </div>
             </div>
           </template>
           <!-- Image Preview -->
           <template v-else>
-            <img :src="previewDocumentUrl" :alt="previewDocumentType" class="full-preview-img" />
+            <img 
+              :src="getViewableUrl(previewDocumentUrl)" 
+              :alt="previewDocumentType" 
+              class="full-preview-img"
+              loading="lazy"
+            />
           </template>
         </div>
         <div class="preview-modal-footer">
-          <a :href="previewDocumentUrl" target="_blank" rel="noopener noreferrer" class="btn btn-primary">
+          <button class="btn btn-secondary" @click="closeDocumentPreview">
+            Close
+          </button>
+          <button 
+            class="btn btn-outline" 
+            @click="downloadDocument(previewDocumentUrl, previewDocumentType)"
+            :disabled="isDownloading"
+          >
             <ArrowTopRightOnSquareIcon class="btn-icon" />
-            Open in New Tab
-          </a>
+            {{ isDownloading ? 'Downloading...' : 'Download' }}
+          </button>
         </div>
       </div>
     </div>
@@ -1533,6 +1955,43 @@ onMounted(async () => {
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-primary);
   padding: 1.25rem;
+}
+
+/* History Card Styles */
+.history-card.approved-card {
+  border-left: 4px solid #16a34a;
+}
+
+.history-card.rejected-card {
+  border-left: 4px solid #dc2626;
+}
+
+.approved-avatar {
+  background: #dcfce7 !important;
+  color: #16a34a !important;
+}
+
+.rejected-avatar {
+  background: #fee2e2 !important;
+  color: #dc2626 !important;
+}
+
+.history-details .full-width {
+  grid-column: 1 / -1;
+}
+
+.rejection-label {
+  color: #dc2626;
+}
+
+.rejection-reason {
+  color: #991b1b;
+  background: #fef2f2;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid #fecaca;
+  font-size: 0.85rem;
+  line-height: 1.5;
 }
 
 .app-header {
@@ -2247,6 +2706,14 @@ onMounted(async () => {
   background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
 }
 
+.document-icon-wrapper.permit {
+  background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%);
+}
+
+.document-icon-wrapper.fda {
+  background: linear-gradient(135deg, #fce4ec 0%, #f8bbd0 100%);
+}
+
 .document-type-icon {
   width: 1.25rem;
   height: 1.25rem;
@@ -2259,6 +2726,14 @@ onMounted(async () => {
 
 .document-icon-wrapper.dti .document-type-icon {
   color: #f57c00;
+}
+
+.document-icon-wrapper.permit .document-type-icon {
+  color: #8e24aa;
+}
+
+.document-icon-wrapper.fda .document-type-icon {
+  color: #c62828;
 }
 
 .document-info {
@@ -2403,6 +2878,29 @@ onMounted(async () => {
   color: #f57c00;
 }
 
+.modal-doc-icon-wrap.permit-doc {
+  background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%);
+}
+
+.modal-doc-icon-wrap.permit-doc .modal-doc-icon {
+  color: #8e24aa;
+}
+
+.modal-doc-icon-wrap.fda-doc {
+  background: linear-gradient(135deg, #fce4ec 0%, #f8bbd0 100%);
+}
+
+.modal-doc-icon-wrap.fda-doc .modal-doc-icon {
+  color: #c62828;
+}
+
+.optional-tag {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
 .modal-doc-icon {
   width: 1.25rem;
   height: 1.25rem;
@@ -2469,6 +2967,14 @@ onMounted(async () => {
 
 .doc-action-btn:hover {
   background: #166c3b;
+}
+
+.doc-action-btn.view {
+  background: linear-gradient(135deg, #1f8b4e 0%, #16a34a 100%);
+}
+
+.doc-action-btn.view:hover {
+  background: linear-gradient(135deg, #166c3b 0%, #138b3c 100%);
 }
 
 .doc-action-btn.external {
@@ -2541,6 +3047,35 @@ onMounted(async () => {
   color: white;
 }
 
+.preview-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.preview-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.pdf-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.img-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
 .preview-modal-body {
   flex: 1;
   overflow: auto;
@@ -2588,6 +3123,18 @@ onMounted(async () => {
   background: var(--surface-hover);
 }
 
+.btn-outline {
+  background: transparent;
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  text-decoration: none;
+}
+
+.btn-outline:hover {
+  background: var(--color-primary);
+  color: white;
+}
+
 /* PDF Preview Styles */
 .document-preview-modal.pdf-modal {
   width: 90vw;
@@ -2610,23 +3157,47 @@ onMounted(async () => {
   border: none;
   border-radius: var(--radius-md);
   background: white;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
 }
 
-.pdf-fallback {
-  display: none;
+.pdf-viewer-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
+  gap: 1rem;
+}
+
+.pdf-fallback {
+  display: block;
   text-align: center;
-  color: var(--text-secondary);
+  padding: 1rem;
+  background: rgba(31, 139, 78, 0.05);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(31, 139, 78, 0.2);
+  max-width: 400px;
 }
 
 .pdf-fallback-icon {
-  width: 4rem;
-  height: 4rem;
-  margin-bottom: 1rem;
+  width: 2rem;
+  height: 2rem;
+  color: var(--color-primary);
+  margin: 0 auto 0.5rem;
+  display: block;
+}
+
+.pdf-fallback p {
+  margin: 0 0 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.pdf-fallback small {
   color: var(--text-tertiary);
+  font-size: 0.8rem;
 }
 
 /* PDF Preview Placeholder in Document Cards */

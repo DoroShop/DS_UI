@@ -25,6 +25,7 @@ export interface SellerApplication {
     coordinates: [number, number];
   };
   fdaCertificateUrl?: string | null;
+  businessPermitUrl?: string;
   status: "not_applied" | "pending" | "approved" | "rejected";
   rejectionReason?: string;
   submittedAt?: string;
@@ -46,6 +47,7 @@ export interface SellerApplicationForm {
   birTin: File | null;
   dtiOrSec: File | null;
   fdaCertificate?: File | null;
+  businessPermit: File | null;
   shopProfile?: File | null;
 }
 
@@ -185,7 +187,9 @@ export const useSellerApplicationStore = defineStore("sellerApplication", {
 
         // Append shop location coordinates (optional)
         if (
+          applicationData.shopLatitude !== undefined &&
           applicationData.shopLatitude !== null &&
+          applicationData.shopLongitude !== undefined &&
           applicationData.shopLongitude !== null
         ) {
           formData.append(
@@ -213,6 +217,9 @@ export const useSellerApplicationStore = defineStore("sellerApplication", {
         }
         if (applicationData.fdaCertificate) {
           formData.append("fdaCertificate", applicationData.fdaCertificate);
+        }
+        if (applicationData.businessPermit) {
+          formData.append("businessPermit", applicationData.businessPermit);
         }
 
         const response = await axios.post(

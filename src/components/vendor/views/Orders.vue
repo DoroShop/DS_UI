@@ -68,6 +68,14 @@ const safeNumber = (v: unknown) => {
 
 const currency = (n: number | null | undefined) => formatToPHCurrency(safeNumber(n));
 
+// Helper function to decode HTML entities like &amp; to &
+const decodeHtmlEntities = (str: string) => {
+  if (!str) return '';
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = str;
+  return textarea.value;
+};
+
 const dateLabel = (iso: string | number | Date | null | undefined) => {
   if (!iso) return "-";
   const d = new Date(iso);
@@ -861,7 +869,7 @@ onUnmounted(() => {
             <div class="info-line">
               <span class="lbl">Shipping Mode:</span>
               <span class="val strong">
-                {{ order.shippingOption }}
+                {{ decodeHtmlEntities(order.shippingOption || '') }}
                 <button
                   v-if="order.shippingOption === 'agreement'"
                   class="btn-icon chat-btn"

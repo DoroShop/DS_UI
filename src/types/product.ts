@@ -37,7 +37,7 @@ export interface Promotion {
   discountValue: number;
   startDate?: string;
   endDate?: string;
-  freeShipping: boolean;
+  freeShipping?: boolean;
 }
 
 export interface ProductReview {
@@ -82,6 +82,14 @@ export interface Product {
   promotionStatus?: 'active' | 'scheduled' | 'expired' | 'inactive';
   // Category can be a single category string (legacy) or accessed from categories array
   category?: string;
+
+  // J&T Shipping Profile
+  weightKg?: number | null;
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
+  shippingDiscountType?: 'NONE' | 'FIXED' | 'PERCENT';
+  shippingDiscountValue?: number;
 }
 
 // Edit Product Form Types
@@ -92,6 +100,13 @@ export interface EditProductForm {
   stock: number;
   option: ProductOption[];
   promotion: Promotion;
+  // J&T Shipping Profile
+  weightKg: number | null;
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+  shippingDiscountType: 'NONE' | 'FIXED' | 'PERCENT';
+  shippingDiscountValue: number;
 }
 
 export interface PromotionApiPayload {

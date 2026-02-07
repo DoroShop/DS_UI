@@ -319,24 +319,46 @@ watch(
           />
         </transition>
 
+        <!-- Rejection Reason Banner -->
+        <div v-if="product.status === 'rejected' && product.rejectionReason" class="rejection-banner">
+          <div class="rejection-banner-icon">⚠️</div>
+          <div class="rejection-banner-content">
+            <strong>Product Rejected by Admin</strong>
+            <p>{{ product.rejectionReason }}</p>
+            <span v-if="product.rejectedAt" class="rejection-date">Rejected on {{ new Date(product.rejectedAt).toLocaleDateString() }}</span>
+          </div>
+        </div>
+
+        <!-- Pending Review Banner -->
+        <div v-if="product.status === 'pending_review'" class="pending-banner">
+          <div class="pending-banner-icon">🕐</div>
+          <div class="pending-banner-content">
+            <strong>Awaiting Admin Approval</strong>
+            <p>This product is under review. You can still edit it while waiting.</p>
+          </div>
+        </div>
+
         <!-- OPTIONS SECTION -->
         <div class="options-section">
           <div class="section-header">
             <h3>Product Options</h3>
             <button
-              v-if="!showAddForm"
+              v-if="!showAddForm && product.isOption"
               @click="showAddForm = true"
               class="btn tiny outline"
               type="button"
             >
               <PlusCircleIcon class="icon mini" /> Add Option
             </button>
+            <span v-if="!product.isOption" class="no-options-hint">
+              Standard product — variants not available
+            </span>
           </div>
 
-          <!-- ADD OPTION FORM -->
+          <!-- ADD OPTION FORM (only for optioned products) -->
           <transition name="slide-v">
             <OptionForm
-              v-if="showAddForm"
+              v-if="showAddForm && product.isOption"
               :productId="product._id"
               @cancel="showAddForm = false"
             />
@@ -1212,5 +1234,76 @@ watch(
   .option-info {
     padding: 1rem;
   }
+}
+
+/* Rejection & Pending Banners */
+.rejection-banner {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 10px;
+  margin-bottom: 1.25rem;
+}
+
+.rejection-banner-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.rejection-banner-content strong {
+  display: block;
+  color: var(--color-danger, #dc2626);
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.rejection-banner-content p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-primary, #1e293b);
+  line-height: 1.4;
+}
+
+.rejection-date {
+  font-size: 0.75rem;
+  color: var(--text-tertiary, #94a3b8);
+  margin-top: 0.375rem;
+  display: inline-block;
+}
+
+.pending-banner {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 10px;
+  margin-bottom: 1.25rem;
+}
+
+.pending-banner-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.pending-banner-content strong {
+  display: block;
+  color: var(--color-warning, #d97706);
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.pending-banner-content p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #64748b);
+}
+
+.no-options-hint {
+  font-size: 0.8rem;
+  color: var(--text-tertiary, #94a3b8);
+  font-style: italic;
 }
 </style>

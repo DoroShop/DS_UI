@@ -5,6 +5,7 @@ import { QuillEditor } from "@vueup/vue-quill";
 import CropperModal from "./ImageCropper.vue";
 import { useVendorDashboardStore } from "../../stores/vendor/dashboardStores";
 import { dataUrlToFile } from "../../utils/convertToFile";
+import type { Product, Promotion } from "../../types/product";
 
 const getStore = () => useVendorDashboardStore();
 
@@ -16,28 +17,6 @@ interface CropPayload {
   format: string;
 }
 
-interface Promotion {
-  isActive: boolean;
-  discountType: 'percentage' | 'fixed' | 'none';
-  discountValue: number;
-  startDate?: string;
-  endDate?: string;
-  freeShipping: boolean;
-}
-
-interface Product {
-  _id: string;
-  name: string;
-  description?: string;
-  price: number;
-  stock: number;
-  imageUrls: string[];
-  isNew: boolean;
-  isHot: boolean;
-  municipality: string;
-  promotion?: Promotion;
-}
-
 interface ProductFormData {
   name: string;
   description: string;
@@ -45,7 +24,15 @@ interface ProductFormData {
   stock: number;
   imageUrls: string[];
   municipality: string;
+  categories: string[];
   promotion: Promotion;
+  // J&T Shipping Profile
+  weightKg: number | null;
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+  shippingDiscountType: 'NONE' | 'FIXED' | 'PERCENT';
+  shippingDiscountValue: number;
 }
 
 const props = defineProps<{ product: Product }>();
@@ -62,23 +49,46 @@ const form = reactive<ProductFormData>({
   stock: 0,
   imageUrls: [],
   municipality: "",
+  categories: [],
   promotion: {
     isActive: false,
     discountType: 'none',
     discountValue: 0,
     startDate: '',
-    endDate: '',
-    freeShipping: false
-  }
+    endDate: ''
+  },
+  weightKg: null,
+  lengthCm: null,
+  widthCm: null,
+  heightCm: null,
+  shippingDiscountType: 'NONE',
+  shippingDiscountValue: 0
 });
 
 const originalImageUrls = ref<string[]>([]);
-const deletedImages = ref<string[]>([]); // Track deleted Cloudinary URLs for cleanup
+const deletedImages = ref<string[]>([]);
 const isUpdating = ref(false);
 const uploadProgress = ref(0);
 const cropperVisible = ref(false);
 const cropImageSrc = ref("");
 let currentCropIndex: number | null = null;
+const validationErrors = ref<string[]>([]);
+
+const fixedCategories = [
+  "Native Delicacies",
+  "Dried Fish & Seafood",
+  "Fruits & Produce",
+  "Local Snacks",
+  "Herbal & Wellness Products",
+  "Coffee & Cacao",
+  "Honey Products",
+  "Handicrafts",
+  "Woodcrafts",
+  "Woven Products",
+  "Souvenir Items",
+  "Condiments & Spices",
+  "Apparel & Accessories",
+];
 
 const activeTab = ref('Details');
 
@@ -101,16 +111,14 @@ const editorOptions = {
   preserveWhitespace: false
 };
 
-// Description stats computation
+// Description stats
 const descriptionStats = computed(() => {
   const count = form.description ? form.description.length : 0;
   const max = 5000;
-  const isWarning = count > max * 0.8;
-  const isError = count > max;
-  return { count, max, isWarning, isError };
+  return { count, max, isWarning: count > max * 0.8, isError: count > max };
 });
 
-// Computed for Promotion Preview
+// Promotion Preview
 const finalPrice = computed(() => {
   if (!form.promotion.isActive || !form.promotion.discountValue) return form.price;
   if (form.promotion.discountType === 'percentage') {
@@ -119,9 +127,37 @@ const finalPrice = computed(() => {
   return Math.max(0, form.price - form.promotion.discountValue);
 });
 
-const savings = computed(() => {
-  return form.price - finalPrice.value;
+const savings = computed(() => form.price - finalPrice.value);
+
+// J&T Shipping validation
+const shippingValid = computed(() => {
+  return (
+    form.weightKg !== null && form.weightKg > 0 &&
+    form.lengthCm !== null && form.lengthCm > 0 &&
+    form.widthCm !== null && form.widthCm > 0 &&
+    form.heightCm !== null && form.heightCm > 0
+  );
 });
+
+const shippingMissing = computed(() => {
+  const missing: string[] = [];
+  if (!form.weightKg || form.weightKg <= 0) missing.push('Weight');
+  if (!form.lengthCm || form.lengthCm <= 0) missing.push('Length');
+  if (!form.widthCm || form.widthCm <= 0) missing.push('Width');
+  if (!form.heightCm || form.heightCm <= 0) missing.push('Height');
+  return missing;
+});
+
+// Category management (fixed list only)
+function toggleCategory(category: string) {
+  const index = form.categories.indexOf(category);
+  if (index !== -1) {
+    form.categories.splice(index, 1);
+  } else {
+    if (form.categories.length >= 3) return;
+    form.categories.push(category);
+  }
+}
 
 onMounted(() => {
   Object.assign(form, {
@@ -131,43 +167,38 @@ onMounted(() => {
     stock: props.product.stock,
     imageUrls: [...props.product.imageUrls],
     municipality: props.product.municipality,
-    promotion: props.product.promotion || {
+    categories: [...(props.product.categories || [])],
+    promotion: props.product.promotion ? { ...props.product.promotion } : {
       isActive: false,
       discountType: 'none',
       discountValue: 0,
       startDate: '',
-      endDate: '',
-      freeShipping: false
-    }
+      endDate: ''
+    },
+    weightKg: props.product.weightKg ?? null,
+    lengthCm: props.product.lengthCm ?? null,
+    widthCm: props.product.widthCm ?? null,
+    heightCm: props.product.heightCm ?? null,
+    shippingDiscountType: props.product.shippingDiscountType || 'NONE',
+    shippingDiscountValue: props.product.shippingDiscountValue || 0,
   });
   originalImageUrls.value = [...props.product.imageUrls];
-  deletedImages.value = []; // Reset deleted images tracking
+  deletedImages.value = [];
 });
 
 const isExisting = (url: string): boolean =>
   originalImageUrls.value.includes(url) || /^https?:\/\//i.test(url);
 
-// Extract public_id from Cloudinary URL for deletion
 function extractPublicIdFromUrl(url: string): string | null {
   if (!url || typeof url !== 'string') return null;
-  
   try {
-    // Find the /upload/ segment
-    const uploadMatch = url.match(/\/upload\/(.*)/); 
+    const uploadMatch = url.match(/\/upload\/(.*)/);
     if (!uploadMatch) return null;
-    
     let pathAfterUpload = uploadMatch[1];
-    
-    // Remove version number if present (v followed by digits and /)
     pathAfterUpload = pathAfterUpload.replace(/^v\d+\//, '');
-    
-    // Remove transformation parameters
     const transformationPattern = /^(?:[a-z]_[^/,]+(?:,[a-z]_[^/,]+)*\/)+/;
     pathAfterUpload = pathAfterUpload.replace(transformationPattern, '');
-    
-    // Remove file extension from the end
     pathAfterUpload = pathAfterUpload.replace(/\.[^/.]+$/, '');
-    
     return pathAfterUpload || null;
   } catch (error) {
     console.error('Extract Public ID Error:', error);
@@ -178,7 +209,6 @@ function extractPublicIdFromUrl(url: string): string | null {
 function onImageChange(event: Event) {
   const files = (event.target as HTMLInputElement).files;
   if (!files) return;
-
   Array.from(files).forEach((file) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -187,7 +217,6 @@ function onImageChange(event: Event) {
     };
     reader.readAsDataURL(file);
   });
-
   (event.target as HTMLInputElement).value = "";
 }
 
@@ -211,12 +240,9 @@ function applyCrop(payload: CropPayload) {
 
 function removeImage(index: number) {
   const imageUrl = form.imageUrls[index];
-  
-  // If it's a Cloudinary URL from the original product, track it for deletion
   if (originalImageUrls.value.includes(imageUrl) && imageUrl.includes('cloudinary.com')) {
     deletedImages.value.push(imageUrl);
   }
-  
   form.imageUrls.splice(index, 1);
 }
 
@@ -225,24 +251,17 @@ const endpoint = `${API_BASE_URL}/upload`;
 
 async function deleteRemovedImagesFromCloudinary(): Promise<void> {
   if (deletedImages.value.length === 0) return;
-  
   try {
     const publicIds = deletedImages.value
       .map(url => extractPublicIdFromUrl(url))
       .filter(id => id !== null) as string[];
-    
     if (publicIds.length === 0) return;
-    
-    console.log('Deleting images from Cloudinary:', publicIds);
-    
     const response = await axios.delete(`${API_BASE_URL}/upload/delete-batch`, {
       data: { publicIds }
     });
-    
     console.log('Cloudinary deletion result:', response.data);
   } catch (error: any) {
     console.error('Failed to delete images from Cloudinary:', error);
-    // Don't throw error here - this shouldn't block product update
   }
 }
 
@@ -250,15 +269,12 @@ async function uploadNewImagesIfAny(): Promise<string[]> {
   const newImages = form.imageUrls.filter(
     (url) => !isExisting(url) && (url.startsWith("data:") || url.startsWith("blob:"))
   );
-
   if (newImages.length === 0) {
     uploadProgress.value = 100;
     return form.imageUrls;
   }
-
   const formData = new FormData();
   let index = 0;
-
   for (const src of newImages) {
     if (src.startsWith("data:")) {
       formData.append("images", dataUrlToFile(src, index++));
@@ -271,7 +287,6 @@ async function uploadNewImagesIfAny(): Promise<string[]> {
       );
     }
   }
-
   uploadProgress.value = 0;
   try {
     const response = await axios.post(endpoint, formData, {
@@ -282,7 +297,6 @@ async function uploadNewImagesIfAny(): Promise<string[]> {
         }
       },
     });
-
     const uploadedUrls = response.data.images?.map((i: any) => i.url) || response.data.urls || [];
     return [...form.imageUrls.filter(isExisting), ...uploadedUrls];
   } catch (error: any) {
@@ -291,11 +305,24 @@ async function uploadNewImagesIfAny(): Promise<string[]> {
   }
 }
 
+function validate(): boolean {
+  const errors: string[] = [];
+  if (!form.name.trim()) errors.push("Product name is required.");
+  if (form.price <= 0) errors.push("Price must be greater than 0.");
+  if (!form.weightKg || form.weightKg <= 0) errors.push("Weight (kg) is required for J&T shipping.");
+  if (!form.lengthCm || form.lengthCm <= 0) errors.push("Length (cm) is required for J&T shipping.");
+  if (!form.widthCm || form.widthCm <= 0) errors.push("Width (cm) is required for J&T shipping.");
+  if (!form.heightCm || form.heightCm <= 0) errors.push("Height (cm) is required for J&T shipping.");
+  validationErrors.value = errors;
+  return errors.length === 0;
+}
+
 async function handleSubmit() {
   if (isUpdating.value) return;
-  if (!form.name.trim()) return alert("Product name required");
-  if (!form.municipality.trim()) return alert("Municipality required");
-  if (form.price <= 0) return alert("Price must be > 0");
+  if (!validate()) {
+    activeTab.value = validationErrors.value.some(e => e.includes('J&T')) ? 'Shipping' : 'Details';
+    return;
+  }
 
   try {
     isUpdating.value = true;
@@ -309,13 +336,16 @@ async function handleSubmit() {
       stock: form.stock,
       imageUrls: finalImageUrls,
       municipality: form.municipality.trim(),
-      promotion: form.promotion
+      categories: form.categories,
+      promotion: form.promotion,
+      weightKg: form.weightKg,
+      lengthCm: form.lengthCm,
+      widthCm: form.widthCm,
+      heightCm: form.heightCm,
     };
 
     emit("submit", payload);
     await getStore().updateBaseProduct(props.product._id, payload);
-
-    // After successful update, delete removed images from Cloudinary
     await deleteRemovedImagesFromCloudinary();
     
     emit("successfullUpdate");
@@ -341,6 +371,13 @@ async function handleSubmit() {
           Details
         </button>
         <button 
+          :class="['tab-btn', { active: activeTab === 'Shipping' }]"
+          @click="activeTab = 'Shipping'"
+        >
+          Shipping
+          <span v-if="!shippingValid" class="badge-dot warn"></span>
+        </button>
+        <button 
           :class="['tab-btn', { active: activeTab === 'Promotion' }]"
           @click="activeTab = 'Promotion'"
         >
@@ -350,13 +387,21 @@ async function handleSubmit() {
       </div>
     </div>
 
+    <!-- Validation Errors Banner -->
+    <div v-if="validationErrors.length > 0" class="validation-banner">
+      <strong>Please fix the following:</strong>
+      <ul>
+        <li v-for="(err, i) in validationErrors" :key="i">{{ err }}</li>
+      </ul>
+    </div>
+
     <form @submit.prevent="handleSubmit" class="form-content">
       
       <!-- DETAILS TAB -->
       <div v-show="activeTab === 'Details'" class="tab-pane">
         <!-- Name -->
         <div class="form-group">
-          <label for="name">Product Name *</label>
+          <label for="name">Product Name <span class="required">*</span></label>
           <input id="name" v-model="form.name" type="text" required class="form-input" placeholder="e.g. Handmade Basket" />
         </div>
 
@@ -397,21 +442,43 @@ async function handleSubmit() {
         <div class="form-row">
           <!-- Price -->
           <div class="form-group">
-            <label for="price">Price (₱) *</label>
+            <label for="price">Price (₱) <span class="required">*</span></label>
             <input id="price" v-model.number="form.price" type="number" min="0" step="0.01" required class="form-input" />
           </div>
 
           <!-- Stock -->
           <div class="form-group">
-            <label for="stock">Stock *</label>
+            <label for="stock">Stock <span class="required">*</span></label>
             <input id="stock" v-model.number="form.stock" type="number" min="0" required class="form-input" />
           </div>
         </div>
 
-        <!-- Municipality -->
+        <!-- Municipality (auto from shop, read-only) -->
         <div class="form-group">
-          <label for="municipality">Municipality *</label>
-          <input id="municipality" v-model="form.municipality" type="text" required class="form-input" placeholder="e.g. Baguio City" />
+          <label for="municipality">Municipality</label>
+          <input id="municipality" :value="form.municipality" type="text" class="form-input read-only-input" readonly disabled />
+          <span class="field-hint">Auto-set from your shop location</span>
+        </div>
+
+        <!-- Categories (fixed list) -->
+        <div class="form-group">
+          <div class="category-header">
+            <label>🏷️ Categories</label>
+            <span class="category-count">{{ form.categories.length }}/3</span>
+          </div>
+          <p class="field-hint">Select up to 3 categories that best describe your product</p>
+          <div class="category-chips-grid">
+            <button
+              v-for="cat in fixedCategories"
+              :key="cat"
+              type="button"
+              :class="['category-chip-btn', { selected: form.categories.includes(cat) }]"
+              @click="toggleCategory(cat)"
+              :disabled="!form.categories.includes(cat) && form.categories.length >= 3"
+            >
+              {{ cat }}
+            </button>
+          </div>
         </div>
 
         <!-- Images -->
@@ -437,12 +504,67 @@ async function handleSubmit() {
         </div>
       </div>
 
+      <!-- SHIPPING TAB -->
+      <div v-show="activeTab === 'Shipping'" class="tab-pane">
+        <div class="shipping-notice" :class="{ 'valid': shippingValid, 'invalid': !shippingValid }">
+          <div class="notice-icon">{{ shippingValid ? '✅' : '⚠️' }}</div>
+          <div class="notice-content">
+            <h4>{{ shippingValid ? 'Shipping info complete' : 'J&T Shipping info required' }}</h4>
+            <p v-if="!shippingValid">Missing: {{ shippingMissing.join(', ') }}. All dimensions are mandatory for J&T delivery.</p>
+            <p v-else>All required shipping dimensions are set.</p>
+          </div>
+        </div>
+
+        <div class="section-title">📦 Package Dimensions</div>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="weightKg">Weight (kg) <span class="required">*</span></label>
+            <input id="weightKg" v-model.number="form.weightKg" type="number" min="0.01" step="0.01" class="form-input" placeholder="e.g. 0.5" />
+          </div>
+          <div class="form-group">
+            <label for="lengthCm">Length (cm) <span class="required">*</span></label>
+            <input id="lengthCm" v-model.number="form.lengthCm" type="number" min="1" step="0.1" class="form-input" placeholder="e.g. 30" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="widthCm">Width (cm) <span class="required">*</span></label>
+            <input id="widthCm" v-model.number="form.widthCm" type="number" min="1" step="0.1" class="form-input" placeholder="e.g. 20" />
+          </div>
+          <div class="form-group">
+            <label for="heightCm">Height (cm) <span class="required">*</span></label>
+            <input id="heightCm" v-model.number="form.heightCm" type="number" min="1" step="0.1" class="form-input" placeholder="e.g. 15" />
+          </div>
+        </div>
+
+        <div class="section-title">🏷️ Shipping Discount</div>
+
+        <div class="shipping-discount-info">
+          <div v-if="form.shippingDiscountType !== 'NONE'" class="discount-status active">
+            <span class="discount-badge">
+              {{ form.shippingDiscountType === 'PERCENT'
+                ? `${form.shippingDiscountValue}% off`
+                : `₱${form.shippingDiscountValue.toFixed(2)} off` }}
+            </span>
+            <span>shipping fee</span>
+          </div>
+          <div v-else class="discount-status inactive">
+            <span>No shipping discount active</span>
+          </div>
+          <p class="discount-hint">
+            Manage shipping discounts from the <strong>Shipping Discounts</strong> page in the sidebar.
+          </p>
+        </div>
+      </div>
+
       <!-- PROMOTION TAB -->
       <div v-show="activeTab === 'Promotion'" class="tab-pane">
         <div class="promotion-toggle-card">
           <div class="toggle-info">
             <h4>Enable Promotion</h4>
-            <p>Offer discounts or free shipping for this product.</p>
+            <p>Offer discounts for this product.</p>
           </div>
           <label class="switch">
             <input type="checkbox" v-model="form.promotion.isActive">
@@ -499,14 +621,6 @@ async function handleSubmit() {
                 Save ₱{{ savings.toFixed(2) }}
               </div>
             </div>
-          </div>
-
-          <div class="form-group">
-            <label class="checkbox-wrapper">
-              <input type="checkbox" v-model="form.promotion.freeShipping">
-              <span class="checkbox-custom"></span>
-              <span class="checkbox-label">Offer Free Shipping 🚚</span>
-            </label>
           </div>
 
           <div class="form-row">
@@ -624,6 +738,41 @@ async function handleSubmit() {
   vertical-align: top;
 }
 
+.badge-dot.warn {
+  background: var(--color-warning, #f59e0b);
+}
+
+/* Validation Banner */
+.validation-banner {
+  margin: 0 2rem;
+  padding: 0.75rem 1rem;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  color: var(--color-danger, #ef4444);
+  font-size: 0.85rem;
+  margin-top: 1rem;
+}
+
+.validation-banner strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.validation-banner ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.validation-banner li {
+  margin-bottom: 0.125rem;
+}
+
+/* Required asterisk */
+.required {
+  color: var(--color-danger, #ef4444);
+}
+
 /* Form Content */
 .form-content {
   padding: 2rem;
@@ -711,6 +860,162 @@ label {
   border-color: var(--color-primary, #3b82f6);
   background: var(--bg-tertiary, #eff6ff);
   color: var(--color-primary, #3b82f6);
+}
+
+/* Read-only input */
+.read-only-input {
+  background: var(--bg-secondary, #f1f5f9) !important;
+  color: var(--text-secondary, #64748b) !important;
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+.field-hint {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-tertiary, #94a3b8);
+  margin-top: 0.35rem;
+}
+
+/* Category fixed picker */
+.category-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.category-count {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+}
+
+.category-chips-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.category-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.375rem 0.875rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--surface, #fff);
+  color: var(--text-primary, #1e293b);
+  border: 1px solid var(--border-primary, #e2e8f0);
+}
+
+.category-chip-btn:hover:not(:disabled):not(.selected) {
+  border-color: var(--color-primary, #1bab50);
+  color: var(--color-primary, #1bab50);
+}
+
+.category-chip-btn.selected {
+  background: var(--color-primary, #1bab50);
+  color: #fff;
+  border-color: var(--color-primary, #1bab50);
+}
+
+.category-chip-btn:disabled:not(.selected) {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Shipping Discount Info Block */
+.shipping-discount-info {
+  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-primary, #e2e8f0);
+  background: var(--bg-secondary, #f8fafc);
+}
+
+.discount-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary, #1e293b);
+  margin-bottom: 0.5rem;
+}
+
+.discount-status.active .discount-badge {
+  display: inline-flex;
+  padding: 0.2rem 0.625rem;
+  background: #dcfce7;
+  color: #16a34a;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.discount-status.inactive {
+  color: var(--text-secondary, #64748b);
+}
+
+.discount-hint {
+  font-size: 0.75rem;
+  color: var(--text-tertiary, #94a3b8);
+  margin: 0;
+}
+
+.discount-hint strong {
+  color: var(--color-primary, #1bab50);
+}
+
+/* Shipping Notice */
+.shipping-notice {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+  border: 1px solid;
+}
+
+.shipping-notice.valid {
+  background: rgba(22, 163, 74, 0.06);
+  border-color: rgba(22, 163, 74, 0.2);
+}
+
+.shipping-notice.invalid {
+  background: rgba(245, 158, 11, 0.06);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.notice-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
+.notice-content h4 {
+  margin: 0 0 0.25rem;
+  font-size: 0.9rem;
+  color: var(--text-primary, #1e293b);
+}
+
+.notice-content p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #64748b);
+}
+
+.section-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-primary, #1e293b);
+  margin-bottom: 1rem;
+  margin-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-primary, #e2e8f0);
 }
 
 .image-preview-grid {
@@ -849,7 +1154,7 @@ input:checked + .slider:before {
 /* Radio Cards */
 .radio-group {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 1rem;
 }
 

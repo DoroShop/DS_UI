@@ -10,7 +10,8 @@ ChartPieIcon,
   ChatBubbleLeftIcon,
   BanknotesIcon,
   ArrowDownCircleIcon,
-  CreditCardIcon
+  CreditCardIcon,
+  TruckIcon
 } from '@heroicons/vue/24/outline'
 import { useMessageStore } from '@/stores/messageStore'
 
@@ -33,6 +34,7 @@ const navItems = [
   { name: 'Store Overview', icon: ChartBarIcon },
   { name: 'Products', icon: CubeIcon },
   { name: 'Orders', icon: ShoppingBagIcon },
+  { name: 'Shipping Discounts', icon: TruckIcon },
   { name: 'Financials', icon: BanknotesIcon },
   { name: 'Withdrawals', icon: ArrowDownCircleIcon },
   { name: 'Subscription', icon: CreditCardIcon },
@@ -182,7 +184,7 @@ onMounted(() => {
   position: relative;
   top: 0;
   left: 0;
-  z-index: 1000000;
+  z-index: 1000;
   height: 100vh;
   background: var(--surface);
   width: 280px;

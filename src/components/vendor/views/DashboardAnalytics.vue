@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, reactive, watch, nextTick } from "vue";
 import { useRouter } from 'vue-router'
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import {
   useAnalyticsStore,
   type AnalyticsProduct,
@@ -9,6 +11,8 @@ import {
   type RangeKey,
 } from "../../../stores/vendor/proAnalytics";
 import { useSubscriptionStore } from '../../../stores/vendor/subscriptionStore'
+import { useVendorDashboardStore } from '../../../stores/vendor/dashboardStores'
+import { storeToRefs } from 'pinia'
 import Subscription from './Subscription.vue'
 
 type TabKey = "overview" | "recommendations" | "products" | "customers" | "locations";
@@ -26,6 +30,8 @@ type RecoItem = {
 
 const analytics = useAnalyticsStore();
 const subscriptionStore = useSubscriptionStore();
+const dashboardStore = useVendorDashboardStore();
+const { vendor } = storeToRefs(dashboardStore);
 const router = useRouter();
 const showSubscriptionBanner = ref(false)
 
@@ -49,7 +55,6 @@ onMounted(async () => {
     await subscriptionStore.fetchSubscription();
     showSubscriptionBanner.value = !subscriptionStore.isSubscribed;
   } catch (err) {
-    // If fetch fails, be conservative and show the subscription UI so seller can verify
     console.warn('Failed to fetch subscription status:', err);
     showSubscriptionBanner.value = true;
   }
@@ -57,6 +62,19 @@ onMounted(async () => {
   if (!showSubscriptionBanner.value) {
     await analytics.ensureAnalytics();
   }
+
+  // Load vendor data + pinned products for dashboard tools
+  if (!vendor.value && typeof dashboardStore.fetchVendor === "function") {
+    await dashboardStore.fetchVendor();
+  }
+  await loadPinnedProducts();
+  
+  nextTick(() => { if (currentLocation.value) initPreviewMap(); });
+});
+
+onUnmounted(() => {
+  destroyLocationMap();
+  if (previewMap) { previewMap.remove(); previewMap = null; }
 });
 
 watch(
@@ -98,6 +116,254 @@ function goToSubscription() {
   }
 }
 const showSkeleton = computed(() => analytics.loading && !ready.value && !analytics.error);
+
+/* ─────────── Pinned Featured Products ─────────── */
+const pinnedProducts = ref<any[]>([]);
+const pinnedLoading = ref(false);
+const showPinModal = ref(false);
+const pinningProductId = ref<string | null>(null);
+
+const isSubscribed = computed(() => subscriptionStore.isSubscribed);
+
+const approvedProducts = computed(() => {
+  const prods = dashboardStore.vendorProducts || [];
+  return prods.filter((p: any) => p.status === "approved" && !p.isDisabled);
+});
+
+const unpinnedProducts = computed(() => {
+  const pinnedIds = new Set(pinnedProducts.value.map((p: any) => String(p._id)));
+  return approvedProducts.value.filter((p: any) => !pinnedIds.has(String(p._id)));
+});
+
+const canPin = computed(() => pinnedProducts.value.length < 3);
+
+const loadPinnedProducts = async () => {
+  pinnedLoading.value = true;
+  try {
+    pinnedProducts.value = await dashboardStore.getPinnedProducts();
+  } catch (e) {
+    console.warn("Failed to load pinned products:", e);
+  } finally {
+    pinnedLoading.value = false;
+  }
+};
+
+const handlePinProduct = async (productId: string) => {
+  pinningProductId.value = productId;
+  try {
+    await dashboardStore.pinProduct(productId);
+    await loadPinnedProducts();
+    showPinModal.value = false;
+  } catch (e) {
+    // Error already shown by store
+  } finally {
+    pinningProductId.value = null;
+  }
+};
+
+const handleUnpinProduct = async (productId: string) => {
+  pinningProductId.value = productId;
+  try {
+    await dashboardStore.unpinProduct(productId);
+    await loadPinnedProducts();
+  } catch (e) {
+    // Error already shown by store
+  } finally {
+    pinningProductId.value = null;
+  }
+};
+
+/* ─────────── Shop Location Map ─────────── */
+const locationMapContainer = ref<HTMLDivElement | null>(null);
+let locationMap: L.Map | null = null;
+let locationMarker: L.Marker | null = null;
+const editLocation = reactive({ lat: null as number | null, lng: null as number | null });
+const locationSaving = ref(false);
+const showLocationEditor = ref(false);
+const manualLat = ref("");
+const manualLng = ref("");
+const gettingLocation = ref(false);
+
+const previewMapContainer = ref<HTMLDivElement | null>(null);
+let previewMap: L.Map | null = null;
+
+const currentLocation = computed(() => {
+  const loc = vendor.value?.location;
+  if (loc?.coordinates?.length === 2) {
+    return { lng: loc.coordinates[0], lat: loc.coordinates[1] };
+  }
+  return null;
+});
+
+const initPreviewMap = () => {
+  if (!currentLocation.value || !previewMapContainer.value) return;
+  if (previewMap) { previewMap.remove(); previewMap = null; }
+
+  try {
+    previewMap = L.map(previewMapContainer.value, {
+      zoomControl: false, dragging: false, touchZoom: false,
+      doubleClickZoom: false, scrollWheelZoom: false, boxZoom: false, keyboard: false,
+    }).setView([currentLocation.value.lat, currentLocation.value.lng], 15);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(previewMap);
+
+    const shopIcon = L.divIcon({
+      html: '<div style="background: #1f8b4e; color: white; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.35);">🏪</div>',
+      iconSize: [28, 28], className: 'shop-marker'
+    });
+
+    L.marker([currentLocation.value.lat, currentLocation.value.lng], { icon: shopIcon })
+      .addTo(previewMap)
+      .bindTooltip(`${vendor.value?.storeName || 'Your Shop'}`, { permanent: true, direction: 'top' });
+
+    setTimeout(() => previewMap?.invalidateSize(), 100);
+  } catch (error) {
+    console.error('Error initializing preview map:', error);
+  }
+};
+
+const initLocationMap = () => {
+  if (locationMap) return;
+  nextTick(() => {
+    const container = locationMapContainer.value;
+    if (!container) return;
+
+    const center: [number, number] = currentLocation.value
+      ? [currentLocation.value.lat, currentLocation.value.lng]
+      : [12.5, 121.0];
+    const zoom = currentLocation.value ? 15 : 9;
+
+    locationMap = L.map(container, { center, zoom, zoomControl: true });
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap", maxZoom: 19,
+    }).addTo(locationMap);
+
+    if (currentLocation.value) {
+      editLocation.lat = currentLocation.value.lat;
+      editLocation.lng = currentLocation.value.lng;
+      manualLat.value = currentLocation.value.lat.toFixed(6);
+      manualLng.value = currentLocation.value.lng.toFixed(6);
+      locationMarker = L.marker([currentLocation.value.lat, currentLocation.value.lng], { draggable: true }).addTo(locationMap!);
+      locationMarker.on("dragend", (e: any) => {
+        const pos = e.target.getLatLng();
+        editLocation.lat = pos.lat; editLocation.lng = pos.lng;
+        manualLat.value = pos.lat.toFixed(6); manualLng.value = pos.lng.toFixed(6);
+      });
+    }
+
+    locationMap.on("click", (e: any) => {
+      editLocation.lat = e.latlng.lat; editLocation.lng = e.latlng.lng;
+      manualLat.value = e.latlng.lat.toFixed(6); manualLng.value = e.latlng.lng.toFixed(6);
+      if (locationMarker) {
+        locationMarker.setLatLng(e.latlng);
+      } else {
+        locationMarker = L.marker(e.latlng, { draggable: true }).addTo(locationMap!);
+        locationMarker!.on("dragend", (ev: any) => {
+          const pos = ev.target.getLatLng();
+          editLocation.lat = pos.lat; editLocation.lng = pos.lng;
+          manualLat.value = pos.lat.toFixed(6); manualLng.value = pos.lng.toFixed(6);
+        });
+      }
+    });
+
+    setTimeout(() => locationMap?.invalidateSize(), 200);
+  });
+};
+
+const destroyLocationMap = () => {
+  if (locationMap) { locationMap.remove(); locationMap = null; locationMarker = null; editLocation.lat = null; editLocation.lng = null; }
+};
+
+const applyManualCoords = () => {
+  const lat = parseFloat(manualLat.value);
+  const lng = parseFloat(manualLng.value);
+  if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    window.alert("Please enter valid coordinates. Latitude: -90 to 90, Longitude: -180 to 180.");
+    return;
+  }
+  editLocation.lat = lat; editLocation.lng = lng;
+  const latlng = L.latLng(lat, lng);
+  if (locationMarker) {
+    locationMarker.setLatLng(latlng);
+  } else if (locationMap) {
+    locationMarker = L.marker(latlng, { draggable: true }).addTo(locationMap);
+    locationMarker!.on("dragend", (ev: any) => {
+      const pos = ev.target.getLatLng();
+      editLocation.lat = pos.lat; editLocation.lng = pos.lng;
+      manualLat.value = pos.lat.toFixed(6); manualLng.value = pos.lng.toFixed(6);
+    });
+  }
+  locationMap?.setView(latlng, 15);
+};
+
+const useCurrentGPS = () => {
+  if (!navigator.geolocation) { window.alert("Geolocation is not supported."); return; }
+  gettingLocation.value = true;
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const lat = position.coords.latitude; const lng = position.coords.longitude;
+      editLocation.lat = lat; editLocation.lng = lng;
+      manualLat.value = lat.toFixed(6); manualLng.value = lng.toFixed(6);
+      const latlng = L.latLng(lat, lng);
+      if (locationMarker) { locationMarker.setLatLng(latlng); }
+      else if (locationMap) {
+        locationMarker = L.marker(latlng, { draggable: true }).addTo(locationMap);
+        locationMarker!.on("dragend", (ev: any) => {
+          const pos = ev.target.getLatLng();
+          editLocation.lat = pos.lat; editLocation.lng = pos.lng;
+          manualLat.value = pos.lat.toFixed(6); manualLng.value = pos.lng.toFixed(6);
+        });
+      }
+      locationMap?.setView(latlng, 15);
+      gettingLocation.value = false;
+    },
+    () => { gettingLocation.value = false; window.alert("Failed to get your location."); },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+};
+
+const saveShopLocation = async () => {
+  if (editLocation.lat == null || editLocation.lng == null) return;
+  locationSaving.value = true;
+  try {
+    await dashboardStore.updateShopLocation(editLocation.lat, editLocation.lng);
+    showLocationEditor.value = false;
+  } catch (e) { /* Error shown in store */ }
+  finally { locationSaving.value = false; }
+};
+
+const removeShopLocation = async () => {
+  if (!confirm("Remove your shop's map location?")) return;
+  locationSaving.value = true;
+  try {
+    await dashboardStore.removeShopLocation();
+    if (locationMarker) { locationMarker.remove(); locationMarker = null; }
+    editLocation.lat = null; editLocation.lng = null;
+    showLocationEditor.value = false;
+  } catch (e) { /* Error shown in store */ }
+  finally { locationSaving.value = false; }
+};
+
+const toggleLocationEditor = () => {
+  showLocationEditor.value = !showLocationEditor.value;
+  if (showLocationEditor.value) {
+    nextTick(() => initLocationMap());
+  } else {
+    destroyLocationMap();
+  }
+};
+
+watch(showLocationEditor, (val) => {
+  if (val) nextTick(() => initLocationMap());
+  else destroyLocationMap();
+});
+
+watch(currentLocation, () => {
+  nextTick(() => { if (currentLocation.value) initPreviewMap(); });
+}, { immediate: true });
 
 const periodText = computed(() => {
   const p = analytics.data?.period;
@@ -1439,6 +1705,238 @@ const topLocationsPreviewFiltered = computed(() => topLocationsPreview.value.fil
             </div>
           </section>
         </section>
+
+      <!-- ═══════════════════ SELLER TOOLS ═══════════════════ -->
+      <section class="seller-tools">
+        <div class="st-header">
+          <div class="st-header__left">
+            <div class="st-eyebrow">
+              <span class="st-dot" aria-hidden="true"></span>
+              <span>Seller Tools</span>
+            </div>
+            <h2 class="st-title">Featured Products &amp; Shop Location</h2>
+            <p class="st-sub">Manage your visibility — pin products and set your shop on the map.</p>
+          </div>
+        </div>
+
+        <div class="st-grid">
+          <!-- ── Pinned Featured Products Card ── -->
+          <div class="st-card st-card--pin">
+            <div class="st-card__head">
+              <div class="st-card__icon st-card__icon--sparkle" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path fill="currentColor" d="M9.937 3.823a.75.75 0 01.326 1.009A8.504 8.504 0 009 9c0 .937.152 1.839.432 2.682a.75.75 0 01-1.423.473A9.961 9.961 0 017.5 9c0-1.392.284-2.718.797-3.924a.75.75 0 011.009-.326l.631.073zm4.126 0a.75.75 0 011.009.326A9.961 9.961 0 0115.87 8.07a.75.75 0 01-1.423-.473A8.504 8.504 0 0015 9c0-.937-.152-1.839-.432-2.682a.75.75 0 01.326-1.009l.169-.486zM12 2.25a.75.75 0 01.75.75v2a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM12 8.25a.75.75 0 01.75.75v6a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm-4.5 6a.75.75 0 01.75.75v2.5a.75.75 0 01-1.5 0V15a.75.75 0 01.75-.75zm9 0a.75.75 0 01.75.75v2.5a.75.75 0 01-1.5 0V15a.75.75 0 01.75-.75zM12 18.75a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5a.75.75 0 01.75-.75z"/></svg>
+              </div>
+              <div>
+                <h3 class="st-card__title">Pinned Featured Products</h3>
+                <p class="st-card__sub">Pin up to 3 products to appear in <strong>Featured Products</strong> on the homepage.</p>
+              </div>
+              <button v-if="isSubscribed && canPin" class="st-btn st-btn--primary" @click="showPinModal = true">
+                <svg class="st-btn__ic" viewBox="0 0 20 20"><path fill="currentColor" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"/></svg>
+                Pin Product
+              </button>
+            </div>
+
+            <div v-if="!isSubscribed" class="st-gate">
+              <div class="st-gate__glow" aria-hidden="true"></div>
+              <div class="st-gate__icon"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 1.5a.75.75 0 01.75.75V4.5a.75.75 0 01-1.5 0V2.25A.75.75 0 0112 1.5zM5.636 4.636a.75.75 0 011.06 0l1.592 1.591a.75.75 0 01-1.061 1.06l-1.59-1.59a.75.75 0 010-1.061zm12.728 0a.75.75 0 010 1.06l-1.591 1.592a.75.75 0 11-1.06-1.061l1.59-1.59a.75.75 0 011.061 0zM12 7.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9zm-9.75 4.5a.75.75 0 01.75-.75h2.25a.75.75 0 010 1.5H3a.75.75 0 01-.75-.75zM18 12a.75.75 0 01.75-.75H21a.75.75 0 010 1.5h-2.25A.75.75 0 0118 12zm-1.227 4.773a.75.75 0 011.06 0l1.591 1.591a.75.75 0 11-1.06 1.061l-1.591-1.591a.75.75 0 010-1.061zm-9.546 0a.75.75 0 010 1.06l-1.591 1.592a.75.75 0 01-1.061-1.06l1.591-1.592a.75.75 0 011.06 0zM12 18a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0v-2.25A.75.75 0 0112 18z"/></svg></div>
+              <h3 class="st-gate__title">Subscribe to Unlock</h3>
+              <p class="st-gate__desc">Pin your best products to the Featured section and boost visibility.</p>
+              <button class="st-btn st-btn--primary" @click="goToSubscription">View Plans</button>
+            </div>
+
+            <template v-else>
+              <div v-if="pinnedLoading" class="st-loading">Loading pinned products…</div>
+
+              <div v-else-if="pinnedProducts.length === 0" class="st-empty">
+                <div class="st-empty__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path fill="currentColor" d="M9.937 3.823a.75.75 0 01.326 1.009A8.504 8.504 0 009 9c0 .937.152 1.839.432 2.682a.75.75 0 01-1.423.473A9.961 9.961 0 017.5 9c0-1.392.284-2.718.797-3.924a.75.75 0 011.009-.326l.631.073z"/></svg>
+                </div>
+                <p class="st-empty__title">No pinned products yet</p>
+                <p class="st-empty__desc">Pin your best-selling products so they appear in Featured Products for all customers.</p>
+              </div>
+
+              <div v-else class="st-pinned-list">
+                <div v-for="prod in pinnedProducts" :key="prod._id" class="st-pinned">
+                  <img
+                    class="st-pinned__img"
+                    :src="prod.imageUrls?.[0] || prod.option?.[0]?.imageUrl || ''"
+                    :alt="prod.name"
+                    @error="(e: any) => e.target.style.display='none'"
+                  />
+                  <div class="st-pinned__body">
+                    <div class="st-pinned__name">{{ prod.name }}</div>
+                    <div class="st-pinned__price">₱{{ (prod.price || prod.option?.[0]?.price || 0).toLocaleString() }}</div>
+                  </div>
+                  <button
+                    class="st-btn st-btn--ghost st-btn--sm"
+                    :disabled="pinningProductId === prod._id"
+                    @click="handleUnpinProduct(prod._id)"
+                  >
+                    {{ pinningProductId === prod._id ? '…' : 'Unpin' }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="st-slots">
+                <div class="st-slots__bar">
+                  <div class="st-slots__fill" :style="{ width: `${(pinnedProducts.length / 3) * 100}%` }"></div>
+                </div>
+                <span class="st-slots__text">{{ pinnedProducts.length }} / 3 slots used</span>
+              </div>
+            </template>
+          </div>
+
+          <!-- ── Shop Location Card ── -->
+          <div class="st-card st-card--loc">
+            <div class="st-card__head">
+              <div class="st-card__icon st-card__icon--map" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 010-5 2.5 2.5 0 010 5z"/></svg>
+              </div>
+              <div>
+                <h3 class="st-card__title">Shop Location</h3>
+                <p class="st-card__sub">Set your shop's location on the <strong>Nearby Shops</strong> customer map.</p>
+              </div>
+              <button v-if="isSubscribed" class="st-btn st-btn--primary" @click="toggleLocationEditor">
+                {{ showLocationEditor ? 'Close Editor' : (currentLocation ? 'Edit Location' : 'Set Location') }}
+              </button>
+            </div>
+
+            <div v-if="!isSubscribed" class="st-gate">
+              <div class="st-gate__glow" aria-hidden="true"></div>
+              <div class="st-gate__icon"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/></svg></div>
+              <h3 class="st-gate__title">Subscribe to Pin Your Shop</h3>
+              <p class="st-gate__desc">Get discovered on the Nearby Shops map by customers near you.</p>
+              <button class="st-btn st-btn--primary" @click="goToSubscription">View Plans</button>
+            </div>
+
+            <template v-else>
+              <!-- Preview: show current location status -->
+              <div v-if="currentLocation" class="st-loc-status st-loc-status--active">
+                <div class="st-loc-status__badge">
+                  <span class="st-loc-status__dot st-loc-status__dot--ok"></span>
+                  <span>{{ vendor?.isApproved ? 'Visible to Customers' : 'Pending Approval' }}</span>
+                </div>
+                <div class="st-loc-status__coords">
+                  <span>Lat: {{ currentLocation.lat.toFixed(6) }}</span>
+                  <span class="st-loc-status__sep">·</span>
+                  <span>Lng: {{ currentLocation.lng.toFixed(6) }}</span>
+                </div>
+                <div class="st-loc-preview" ref="previewMapContainer"></div>
+              </div>
+
+              <div v-else class="st-loc-status st-loc-status--empty">
+                <div class="st-loc-status__badge">
+                  <span class="st-loc-status__dot st-loc-status__dot--off"></span>
+                  <span>No Location Set</span>
+                </div>
+                <p class="st-loc-status__hint">Click "Set Location" to pin your shop on the map so customers can find you.</p>
+              </div>
+
+              <!-- Inline Location Editor -->
+              <div v-if="showLocationEditor" class="st-loc-editor">
+                <div class="st-loc-editor__head">
+                  <span>Pin Your Location</span>
+                  <span class="st-loc-editor__hint">Click the map or enter coordinates manually.</span>
+                </div>
+
+                <div class="st-loc-editor__coords">
+                  <div class="st-field">
+                    <label class="st-field__label">Latitude</label>
+                    <input v-model="manualLat" class="st-field__input st-field__input--mono" placeholder="e.g. 12.879721" type="text" />
+                  </div>
+                  <div class="st-field">
+                    <label class="st-field__label">Longitude</label>
+                    <input v-model="manualLng" class="st-field__input st-field__input--mono" placeholder="e.g. 121.053886" type="text" />
+                  </div>
+                  <div class="st-loc-editor__btns">
+                    <button class="st-btn st-btn--sm" @click="applyManualCoords" :disabled="!manualLat || !manualLng">Apply</button>
+                    <button class="st-btn st-btn--primary st-btn--sm" @click="useCurrentGPS" :disabled="gettingLocation">
+                      {{ gettingLocation ? 'Locating…' : 'Use My GPS' }}
+                    </button>
+                  </div>
+                </div>
+
+                <div ref="locationMapContainer" class="st-loc-map"></div>
+
+                <div v-if="editLocation.lat != null" class="st-loc-editor__selected">
+                  Selected: {{ editLocation.lat?.toFixed(6) }}, {{ editLocation.lng?.toFixed(6) }}
+                </div>
+
+                <div class="st-loc-editor__actions">
+                  <button
+                    class="st-btn st-btn--primary"
+                    :disabled="editLocation.lat == null || locationSaving"
+                    @click="saveShopLocation"
+                  >
+                    {{ locationSaving ? 'Saving…' : 'Save Location' }}
+                  </button>
+                  <button
+                    v-if="currentLocation"
+                    class="st-btn st-btn--ghost"
+                    :disabled="locationSaving"
+                    @click="removeShopLocation"
+                  >
+                    Remove Location
+                  </button>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Pin Product Modal ── -->
+      <teleport to="body">
+        <transition name="fade">
+          <div v-if="showPinModal" class="st-backdrop" @click.self="showPinModal = false">
+            <div class="st-modal">
+              <header class="st-modal__head">
+                <div class="st-modal__headLeft">
+                  <div class="st-modal__icon">
+                    <svg viewBox="0 0 24 24"><path fill="currentColor" d="M9.937 3.823a.75.75 0 01.326 1.009A8.504 8.504 0 009 9c0 .937.152 1.839.432 2.682a.75.75 0 01-1.423.473A9.961 9.961 0 017.5 9c0-1.392.284-2.718.797-3.924a.75.75 0 011.009-.326l.631.073z"/></svg>
+                  </div>
+                  <div>
+                    <h3 class="st-modal__title">Pin a Product</h3>
+                    <p class="st-modal__sub">Select a product to feature ({{ 3 - pinnedProducts.length }} slot{{ 3 - pinnedProducts.length !== 1 ? 's' : '' }} remaining)</p>
+                  </div>
+                </div>
+                <button class="st-modal__close" @click="showPinModal = false" aria-label="Close">
+                  <svg viewBox="0 0 24 24"><path fill="currentColor" d="M18.3 5.71a1 1 0 00-1.41 0L12 10.59 7.11 5.7a1 1 0 10-1.41 1.42L10.59 12l-4.9 4.89a1 1 0 101.41 1.42L12 13.41l4.89 4.9a1 1 0 001.42-1.41L13.41 12l4.9-4.89a1 1 0 00-.01-1.4z"/></svg>
+                </button>
+              </header>
+              <div class="st-modal__body">
+                <div v-if="unpinnedProducts.length === 0" class="st-empty">
+                  <p class="st-empty__title">No eligible products to pin</p>
+                  <p class="st-empty__desc">Only approved products with stock can be pinned.</p>
+                </div>
+                <div v-else class="st-pin-select">
+                  <div
+                    v-for="prod in unpinnedProducts"
+                    :key="prod._id"
+                    class="st-pin-item"
+                    @click="handlePinProduct(prod._id)"
+                    :class="{ 'st-pin-item--disabled': pinningProductId === prod._id }"
+                  >
+                    <img
+                      class="st-pin-item__img"
+                      :src="prod.imageUrls?.[0] || prod.option?.[0]?.imageUrl || ''"
+                      :alt="prod.name"
+                      @error="(e: any) => e.target.style.display='none'"
+                    />
+                    <div class="st-pin-item__body">
+                      <div class="st-pin-item__name">{{ prod.name }}</div>
+                      <div class="st-pin-item__meta">₱{{ (prod.price || prod.option?.[0]?.price || 0).toLocaleString() }} · Stock: {{ prod.stock }}</div>
+                    </div>
+                    <span class="st-pin-item__action">
+                      {{ pinningProductId === prod._id ? 'Pinning…' : 'Pin' }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </transition>
+      </teleport>
       </section>
 
       <section v-else class="empty-screen">
@@ -2952,5 +3450,425 @@ tbody tr:hover td {
 .subscription-banner .banner-actions { display:flex; gap:8px }
 
 .subscription-inline { padding: 1rem 0; }
+
+/* ═══════════════════════════════════════════════════════════════
+   SELLER TOOLS — Pinned Products & Shop Location
+   ═══════════════════════════════════════════════════════════════ */
+
+.seller-tools {
+  margin-top: clamp(24px, 3vw, 36px);
+  padding-top: clamp(20px, 2.6vw, 32px);
+  border-top: 1px solid var(--bdr2);
+}
+
+.st-header { margin-bottom: clamp(16px, 2vw, 24px); }
+.st-header__left { display: flex; flex-direction: column; gap: 4px; }
+.st-eyebrow {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--brand-light); margin-bottom: 2px;
+}
+.st-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--brand-light);
+  box-shadow: 0 0 8px var(--brand-light);
+}
+.st-title {
+  font-size: clamp(18px, 2.2vw, 22px); font-weight: 800; letter-spacing: -0.02em;
+  margin: 0; color: var(--txt);
+}
+.st-sub {
+  font-size: 13px; color: var(--txt3); margin: 0;
+}
+
+.st-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+  gap: clamp(12px, 1.6vw, 20px);
+}
+
+/* ─── Card Shell ─── */
+.st-card {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--bdr);
+  border-radius: clamp(12px, 1.4vw, 16px);
+  padding: clamp(16px, 2vw, 24px);
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.st-card::before {
+  content: "";
+  position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  background: radial-gradient(600px circle at 50% -20%, var(--brand-softer), transparent 70%);
+  opacity: 0.5;
+}
+.st-card:hover {
+  border-color: color-mix(in srgb, var(--brand) 40%, transparent);
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--brand) 10%, transparent);
+}
+
+.st-card__head {
+  display: flex; align-items: flex-start; gap: 12px;
+  margin-bottom: clamp(14px, 1.8vw, 20px);
+  position: relative; z-index: 1;
+}
+.st-card__icon {
+  flex-shrink: 0; width: 40px; height: 40px;
+  border-radius: 12px; display: grid; place-items: center;
+}
+.st-card__icon svg { width: 20px; height: 20px; }
+.st-card__icon--sparkle {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.14), rgba(16, 185, 129, 0.08));
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: #22c55e;
+}
+.st-card__icon--map {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.14), rgba(251, 191, 36, 0.08));
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: #f59e0b;
+}
+.st-card__title {
+  margin: 0; font-size: clamp(14px, 1.6vw, 16px); font-weight: 700;
+  letter-spacing: -0.01em; color: var(--txt);
+}
+.st-card__sub {
+  margin: 2px 0 0; font-size: 12.5px; color: var(--txt3); line-height: 1.45;
+}
+.st-card__head > div:nth-child(2) { flex: 1; min-width: 0; }
+
+/* ─── Buttons ─── */
+.st-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 13px; font-weight: 600;
+  padding: 7px 14px; border-radius: 8px;
+  border: 1px solid var(--bdr);
+  background: var(--panel); color: var(--txt);
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
+  position: relative; z-index: 1;
+}
+.st-btn:hover { border-color: var(--brand); color: var(--brand-light); }
+.st-btn--primary {
+  background: linear-gradient(135deg, var(--brand), var(--brand-light));
+  border-color: var(--brand); color: #fff;
+}
+.st-btn--primary:hover {
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 35%, transparent);
+  transform: translateY(-1px);
+}
+.st-btn--ghost {
+  background: transparent; border-color: var(--bdr2); color: var(--txt3);
+}
+.st-btn--ghost:hover { border-color: #ef4444; color: #ef4444; }
+.st-btn--sm { font-size: 12px; padding: 5px 10px; border-radius: 6px; }
+.st-btn__ic { width: 14px; height: 14px; }
+.st-btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+
+/* ─── Subscription Gate ─── */
+.st-gate {
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; padding: 28px 20px;
+  border-radius: 12px; position: relative; overflow: hidden;
+  border: 1px dashed color-mix(in srgb, var(--brand) 30%, transparent);
+  background: color-mix(in srgb, var(--brand) 4%, transparent);
+  z-index: 1;
+}
+.st-gate__glow {
+  position: absolute; top: -40px; left: 50%; transform: translateX(-50%);
+  width: 200px; height: 100px; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--brand) 20%, transparent), transparent 70%);
+  pointer-events: none;
+}
+.st-gate__icon {
+  width: 48px; height: 48px; border-radius: 14px;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent);
+  color: var(--brand-light);
+  margin-bottom: 12px; position: relative;
+}
+.st-gate__icon svg { width: 24px; height: 24px; }
+.st-gate__title {
+  margin: 0 0 6px; font-size: 15px; font-weight: 700;
+  letter-spacing: -0.01em; color: var(--txt);
+}
+.st-gate__desc {
+  margin: 0 0 14px; font-size: 13px; color: var(--txt3);
+  max-width: 340px; line-height: 1.5;
+}
+
+/* ─── Pinned Products List ─── */
+.st-pinned-list {
+  display: flex; flex-direction: column; gap: 8px;
+  position: relative; z-index: 1;
+}
+.st-pinned {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+  border: 1px solid var(--bdr2);
+  border-radius: 10px;
+  transition: all 0.15s;
+}
+.st-pinned:hover {
+  background: color-mix(in srgb, var(--brand) 6%, transparent);
+  border-color: color-mix(in srgb, var(--brand) 30%, transparent);
+}
+.st-pinned__img {
+  width: 48px; height: 48px; border-radius: 8px;
+  object-fit: cover; flex-shrink: 0;
+  background: color-mix(in srgb, var(--txt) 4%, transparent);
+}
+.st-pinned__body { flex: 1; min-width: 0; }
+.st-pinned__name {
+  font-weight: 600; font-size: 13.5px; color: var(--txt);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.st-pinned__price {
+  font-size: 12px; color: var(--brand-light); margin-top: 2px; font-weight: 500;
+}
+
+/* ─── Slots Progress Bar ─── */
+.st-slots {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 14px; position: relative; z-index: 1;
+}
+.st-slots__bar {
+  flex: 1; height: 6px; border-radius: 3px;
+  background: color-mix(in srgb, var(--txt) 10%, transparent);
+  overflow: hidden;
+}
+.st-slots__fill {
+  height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--brand), var(--brand-light));
+  transition: width 0.3s ease;
+}
+.st-slots__text {
+  font-size: 11.5px; color: var(--txt3); font-weight: 500; white-space: nowrap;
+}
+
+/* ─── Empty/Loading States ─── */
+.st-loading {
+  text-align: center; padding: 24px 16px; font-size: 13px;
+  color: var(--txt3); position: relative; z-index: 1;
+}
+.st-empty {
+  text-align: center; padding: 28px 16px; position: relative; z-index: 1;
+}
+.st-empty__icon {
+  width: 40px; height: 40px; margin: 0 auto 10px;
+  color: var(--brand-light); opacity: 0.4;
+}
+.st-empty__icon svg { width: 100%; height: 100%; }
+.st-empty__title {
+  font-size: 14px; font-weight: 600; color: var(--txt2); margin: 0 0 4px;
+}
+.st-empty__desc {
+  font-size: 12.5px; color: var(--txt3); margin: 0; line-height: 1.5; max-width: 300px; margin-inline: auto;
+}
+
+/* ─── Location Status ─── */
+.st-loc-status {
+  padding: 14px; border-radius: 10px;
+  border: 1px solid var(--bdr2);
+  position: relative; z-index: 1;
+}
+.st-loc-status--active {
+  border-color: color-mix(in srgb, var(--brand) 25%, transparent);
+  background: color-mix(in srgb, var(--brand) 4%, transparent);
+}
+.st-loc-status--empty {
+  border-color: color-mix(in srgb, var(--orange) 20%, transparent);
+  background: color-mix(in srgb, var(--orange) 4%, transparent);
+}
+.st-loc-status__badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; color: var(--txt2);
+  margin-bottom: 8px;
+}
+.st-loc-status__dot {
+  width: 8px; height: 8px; border-radius: 50%;
+}
+.st-loc-status__dot--ok {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+}
+.st-loc-status__dot--off {
+  background: color-mix(in srgb, var(--orange) 60%, transparent);
+}
+.st-loc-status__coords {
+  font-size: 12px; color: var(--txt3);
+  font-family: ui-monospace, SFMono-Regular, 'Cascadia Code', monospace;
+  margin-bottom: 12px;
+}
+.st-loc-status__sep { margin: 0 6px; opacity: 0.4; }
+.st-loc-status__hint {
+  font-size: 13px; color: var(--txt3); margin: 0; line-height: 1.5;
+}
+
+/* ─── Location Preview Map ─── */
+.st-loc-preview {
+  width: 100%; height: 180px; border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--bdr2);
+  background: color-mix(in srgb, var(--panel) 40%, transparent);
+}
+
+/* ─── Location Editor ─── */
+.st-loc-editor {
+  margin-top: 16px; padding-top: 16px;
+  border-top: 1px solid var(--bdr2);
+  position: relative; z-index: 1;
+}
+.st-loc-editor__head {
+  display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px;
+}
+.st-loc-editor__head span:first-child {
+  font-size: 14px; font-weight: 600; color: var(--txt);
+}
+.st-loc-editor__hint {
+  font-size: 12px; color: var(--txt3);
+}
+.st-loc-editor__coords {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.st-field { flex: 1; min-width: 120px; }
+.st-field__label {
+  display: block; font-size: 11.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--txt3); margin-bottom: 4px;
+}
+.st-field__input {
+  width: 100%; padding: 8px 10px;
+  font-size: 13px; color: var(--txt);
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+  border: 1px solid var(--bdr); border-radius: 8px;
+  outline: none; transition: border-color 0.15s;
+}
+.st-field__input:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 12%, transparent);
+}
+.st-field__input--mono {
+  font-family: ui-monospace, SFMono-Regular, 'Cascadia Code', monospace;
+  font-size: 12.5px; letter-spacing: 0.02em;
+}
+.st-loc-editor__btns {
+  display: flex; align-items: flex-end; gap: 6px;
+  padding-bottom: 1px;
+}
+
+.st-loc-map {
+  width: 100%; height: 280px; border-radius: 10px;
+  border: 1px solid var(--bdr); overflow: hidden; z-index: 0;
+}
+.st-loc-editor__selected {
+  margin-top: 8px; font-size: 12px; color: var(--txt3);
+  font-family: ui-monospace, SFMono-Regular, 'Cascadia Code', monospace;
+}
+.st-loc-editor__actions {
+  display: flex; gap: 8px; margin-top: 12px;
+}
+
+/* ─── Pin Product Modal ─── */
+.st-backdrop {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.st-modal {
+  background: var(--panel);
+  border: 1px solid var(--bdr);
+  border-radius: 16px;
+  width: 100%; max-width: 520px;
+  overflow: hidden;
+  box-shadow: var(--shadow2);
+}
+.st-modal__head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 20px; border-bottom: 1px solid var(--bdr2);
+}
+.st-modal__headLeft {
+  display: flex; align-items: center; gap: 12px;
+}
+.st-modal__icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent);
+  color: var(--brand-light);
+}
+.st-modal__icon svg { width: 18px; height: 18px; }
+.st-modal__title {
+  margin: 0; font-size: 15px; font-weight: 700; color: var(--txt);
+}
+.st-modal__sub {
+  margin: 2px 0 0; font-size: 12px; color: var(--txt3);
+}
+.st-modal__close {
+  width: 32px; height: 32px; border-radius: 8px;
+  border: 1px solid var(--bdr2); background: transparent;
+  color: var(--txt3); cursor: pointer;
+  display: grid; place-items: center;
+  transition: all 0.15s;
+}
+.st-modal__close svg { width: 16px; height: 16px; }
+.st-modal__close:hover { border-color: var(--txt3); color: var(--txt); }
+.st-modal__body {
+  padding: 16px 20px; max-height: 420px; overflow-y: auto;
+}
+
+/* ─── Pin Select Items ─── */
+.st-pin-select {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.st-pin-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: 10px;
+  cursor: pointer; transition: all 0.15s;
+  border: 1px solid var(--bdr2);
+}
+.st-pin-item:hover {
+  background: color-mix(in srgb, var(--brand) 6%, transparent);
+  border-color: color-mix(in srgb, var(--brand) 30%, transparent);
+}
+.st-pin-item--disabled { opacity: 0.5; pointer-events: none; }
+.st-pin-item__img {
+  width: 42px; height: 42px; border-radius: 8px;
+  object-fit: cover; flex-shrink: 0;
+  background: color-mix(in srgb, var(--txt) 4%, transparent);
+}
+.st-pin-item__body { flex: 1; min-width: 0; }
+.st-pin-item__name {
+  font-weight: 600; font-size: 13.5px; color: var(--txt);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.st-pin-item__meta {
+  font-size: 12px; color: var(--txt3); margin-top: 2px;
+}
+.st-pin-item__action {
+  font-size: 12.5px; font-weight: 600; color: var(--brand-light);
+  flex-shrink: 0;
+}
+
+/* ─── Fade Transition ─── */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* ─── Responsive ─── */
+@media (max-width: 640px) {
+  .st-grid { grid-template-columns: 1fr; }
+  .st-card__head { flex-wrap: wrap; }
+  .st-card__head > .st-btn { width: 100%; justify-content: center; margin-top: 4px; }
+  .st-loc-editor__coords { flex-direction: column; }
+  .st-loc-editor__btns { flex-wrap: wrap; }
+  .st-loc-map { height: 220px; }
+
+  .st-backdrop { align-items: flex-end; padding: 0; }
+  .st-modal { border-radius: 16px 16px 0 0; max-width: 100%; }
+  .st-modal__body { max-height: 60vh; }
+}
 
 </style>

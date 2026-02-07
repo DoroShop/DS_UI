@@ -487,20 +487,106 @@ onMounted(async () => {
               
               <div class="detail-grid">
                 <div class="detail-item">
-                  <span class="detail-label">Category</span>
-                  <span class="detail-value">{{ selectedProduct.category?.name || 'Uncategorized' }}</span>
+                  <span class="detail-label">Categories</span>
+                  <span class="detail-value">
+                    <template v-if="selectedProduct.categories?.length">
+                      <span v-for="(cat, i) in selectedProduct.categories" :key="i" class="category-chip">{{ cat }}</span>
+                    </template>
+                    <template v-else>Uncategorized</template>
+                  </span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Municipality</span>
+                  <span class="detail-value">{{ selectedProduct.municipality || 'N/A' }}</span>
                 </div>
                 <div class="detail-item">
                   <span class="detail-label">Stock</span>
                   <span class="detail-value">{{ selectedProduct.stock || 0 }} units</span>
                 </div>
                 <div class="detail-item">
-                  <span class="detail-label">SKU</span>
-                  <span class="detail-value">{{ selectedProduct.sku || 'N/A' }}</span>
+                  <span class="detail-label">Sold</span>
+                  <span class="detail-value">{{ selectedProduct.sold || 0 }} units</span>
                 </div>
                 <div class="detail-item">
-                  <span class="detail-label">Brand</span>
-                  <span class="detail-value">{{ selectedProduct.brand || 'N/A' }}</span>
+                  <span class="detail-label">Product Type</span>
+                  <span class="detail-value">{{ selectedProduct.isOption ? 'Optioned (Variants)' : 'Standard' }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Rating</span>
+                  <span class="detail-value">{{ (selectedProduct.averageRating || 0).toFixed(1) }}/5 ({{ selectedProduct.numReviews || 0 }} reviews)</span>
+                </div>
+              </div>
+
+              <!-- J&T Shipping Info -->
+              <div class="detail-section shipping-section">
+                <h4>📦 J&T Shipping Profile</h4>
+                <div class="detail-grid">
+                  <div class="detail-item">
+                    <span class="detail-label">Weight</span>
+                    <span class="detail-value" :class="{ 'missing': !selectedProduct.weightKg }">
+                      {{ selectedProduct.weightKg ? selectedProduct.weightKg + ' kg' : 'Not set ⚠️' }}
+                    </span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Length</span>
+                    <span class="detail-value" :class="{ 'missing': !selectedProduct.lengthCm }">
+                      {{ selectedProduct.lengthCm ? selectedProduct.lengthCm + ' cm' : 'Not set ⚠️' }}
+                    </span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Width</span>
+                    <span class="detail-value" :class="{ 'missing': !selectedProduct.widthCm }">
+                      {{ selectedProduct.widthCm ? selectedProduct.widthCm + ' cm' : 'Not set ⚠️' }}
+                    </span>
+                  </div>
+                  <div class="detail-item">
+                    <span class="detail-label">Height</span>
+                    <span class="detail-value" :class="{ 'missing': !selectedProduct.heightCm }">
+                      {{ selectedProduct.heightCm ? selectedProduct.heightCm + ' cm' : 'Not set ⚠️' }}
+                    </span>
+                  </div>
+                  <div class="detail-item" v-if="selectedProduct.shippingDiscountType && selectedProduct.shippingDiscountType !== 'NONE'">
+                    <span class="detail-label">Shipping Discount</span>
+                    <span class="detail-value">
+                      {{ selectedProduct.shippingDiscountType === 'FIXED' 
+                        ? '₱' + (selectedProduct.shippingDiscountValue || 0)
+                        : (selectedProduct.shippingDiscountValue || 0) + '%' }} off
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Product Options/Variants -->
+              <div v-if="selectedProduct.option?.length" class="detail-section variants-section">
+                <h4>🏷️ Product Variants ({{ selectedProduct.option.length }})</h4>
+                <div class="variants-grid">
+                  <div v-for="(opt, i) in selectedProduct.option" :key="i" class="variant-card">
+                    <img v-if="opt.imageUrl" :src="opt.imageUrl" :alt="opt.label" class="variant-img" />
+                    <div class="variant-details">
+                      <span class="variant-label">{{ opt.label || 'Unnamed' }}</span>
+                      <span class="variant-price">{{ formatCurrency(opt.price || 0) }}</span>
+                      <span class="variant-stock">Stock: {{ opt.stock || 0 }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Promotion Info -->
+              <div v-if="selectedProduct.promotion?.isActive" class="detail-section promo-section">
+                <h4>🎁 Active Promotion</h4>
+                <div class="detail-grid">
+                  <div class="detail-item">
+                    <span class="detail-label">Discount</span>
+                    <span class="detail-value">
+                      {{ selectedProduct.promotion.discountType === 'percentage' 
+                        ? selectedProduct.promotion.discountValue + '%' 
+                        : '₱' + selectedProduct.promotion.discountValue }} off
+                    </span>
+                  </div>
+                  <div class="detail-item" v-if="selectedProduct.promotion.freeShipping">
+                    <span class="detail-label">Free Shipping</span>
+                    <span class="detail-value">Yes 🚚</span>
+                  </div>
                 </div>
               </div>
               
@@ -616,6 +702,12 @@ onMounted(async () => {
                 @click="rejectionReason = 'Product pricing appears incorrect or suspicious.'"
               >
                 Pricing issues
+              </button>
+              <button 
+                class="reason-chip"
+                @click="rejectionReason = 'Missing or incomplete J&T shipping dimensions (weight, length, width, height). Please fill in all shipping info.'"
+              >
+                Missing shipping info
               </button>
             </div>
           </div>
@@ -1630,5 +1722,85 @@ onMounted(async () => {
   .preview-modal {
     max-width: 100%;
   }
+}
+
+/* Category Chips */
+.category-chip {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  background: rgba(27, 171, 80, 0.1);
+  color: #1bab50;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-right: 0.25rem;
+}
+
+/* Missing field indicator */
+.detail-value.missing {
+  color: #d97706;
+  font-weight: 600;
+}
+
+/* Shipping Section */
+.shipping-section {
+  border-top: 1px solid var(--border-primary);
+  padding-top: 1rem;
+}
+
+/* Variants Section */
+.variants-section {
+  border-top: 1px solid var(--border-primary);
+  padding-top: 1rem;
+}
+.variants-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+.variant-card {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.625rem;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.variant-img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.variant-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+.variant-label {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.variant-price {
+  font-size: 0.8rem;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.variant-stock {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+/* Promotion Section */
+.promo-section {
+  border-top: 1px solid var(--border-primary);
+  padding-top: 1rem;
 }
 </style>

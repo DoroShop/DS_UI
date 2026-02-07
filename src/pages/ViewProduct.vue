@@ -856,13 +856,13 @@ const getUserAvatar = (user: any) => {
             </div>
             <div class="seller-info">
               <h4 class="seller-name">{{ product.storeName }}</h4>
-              <div class="seller-stats">
+              <!-- <div class="seller-stats">
                 <span class="seller-rating">
                   <StarIcon class="star-mini" />
-                  {{ product.sellerRating || '4.8' }}
+                  {{ product.ratings || '4.8' }}
                 </span>
                 <span class="seller-products">{{ product.sellerProductCount || '50' }}+ Products</span>
-              </div>
+              </div> -->
             </div>
             <BuildingStorefrontIcon class="visit-shop-icon" />
           </div>

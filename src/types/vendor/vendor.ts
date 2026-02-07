@@ -42,6 +42,11 @@ export interface Vendor {
   productClicks: number
   currentMonthlyRevenue: number
   monthlyRevenueComparison: MonthlyRevenueComparison[]
+  location?: {
+    type?: string
+    coordinates?: number[]
+  }
+  shopName?: string
   createdAt: string
   updatedAt: string
 }

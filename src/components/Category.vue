@@ -136,7 +136,7 @@ const clearAllFilters = async () => {
     selectedMunicipality.value = "All Locations";
     selectedProduct.value = "All Categories";
     selectedFilter.value = "Sort By";
-    
+
     // Clear store filter values directly BEFORE making any API calls
     productStore.selectedCategory = '';
     productStore.seletedMunicipality = '';
@@ -145,10 +145,10 @@ const clearAllFilters = async () => {
     productStore.featuredProducts = [];
     productStore.skip = 0;
     productStore.hasMore = true;
-    
+
     // Fetch all products without any filters
     productStore.fetchProducts();
-    
+
     hanldecScroll();
 };
 
@@ -262,7 +262,7 @@ onBeforeUnmount(() => {
                 <div v-if="selectedMunicipality !== 'All Locations'" class="filter-tag">
                     <MapPinIcon class="tag-icon" />
                     <span>{{ selectedMunicipality }}</span>
-                      <button class="remove-tag" @click="selectMunicipality('All')">
+                    <button class="remove-tag" @click="selectMunicipality('All')">
                         <XMarkIcon class="remove-icon" />
                     </button>
                 </div>
@@ -385,6 +385,8 @@ onBeforeUnmount(() => {
 
 .sort-dropdown {
     margin-left: auto;
+    min-width: 100px;
+    max-width: 220px;
 }
 
 .dropdown-btn {
@@ -458,7 +460,7 @@ onBeforeUnmount(() => {
     max-height: 320px;
     overflow: auto;
     scrollbar-width: thin;
-    min-width: fit-content;
+    min-width: fit-content !important;
 }
 
 .dropdown-menu li {
@@ -548,7 +550,7 @@ onBeforeUnmount(() => {
     cursor: pointer;
     border-radius: 50%;
     transition: all var(--transition-fast);
-    color:white;
+    color: white;
 }
 
 .remove-tag:hover {
@@ -585,7 +587,7 @@ onBeforeUnmount(() => {
     .dropdown {
         position: relative;
         flex: 1 1 auto;
-        min-width: 80px;
+        min-width: 90px;
         max-width: 110px;
     }
 

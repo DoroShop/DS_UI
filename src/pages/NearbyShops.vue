@@ -31,6 +31,7 @@ type Shop = {
   address?: ShopAddress;
   location?: { coordinates: [number, number] };
   distance?: number;
+  isFeatured?: boolean;
 };
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -127,7 +128,13 @@ const filteredShops = computed(() => {
 
 const sortedShops = computed(() => {
   const list = [...filteredShops.value];
-  list.sort((a, b) => (a.distance ?? 9e15) - (b.distance ?? 9e15));
+  // Featured sellers first, then sort by distance
+  list.sort((a, b) => {
+    const aFeat = a.isFeatured ? 0 : 1;
+    const bFeat = b.isFeatured ? 0 : 1;
+    if (aFeat !== bFeat) return aFeat - bFeat;
+    return (a.distance ?? 9e15) - (b.distance ?? 9e15);
+  });
   return list;
 });
 
@@ -266,18 +273,21 @@ const updateMapMarkers = () => {
     }
 
     const name = shop.storeName || "Shop";
+    const isFeat = shop.isFeatured;
+    const ringColor = isFeat ? '#f59e0b' : primary;
     const html = `
-      <div class="pin-wrap" data-shop="${shop._id}">
+      <div class="pin-wrap${isFeat ? ' is-featured' : ''}" data-shop="${shop._id}">
         <div class="pin">
-          <div class="avatar" style="--ring:${primary}">
+          ${isFeat ? '<span class="feat-star">★</span>' : ''}
+          <div class="avatar" style="--ring:${ringColor}">
             ${shop.imageUrl
         ? `<img src="${shop.imageUrl}" alt="${name}" />`
         : `<div class="fallback" aria-hidden="true"></div>`
       }
           </div>
-          <div class="tip" style="--ring:${primary}"></div>
+          <div class="tip" style="--ring:${ringColor}"></div>
         </div>
-        <div class="label">${name}</div>
+        <div class="label">${isFeat ? '⭐ ' : ''}${name}</div>
       </div>
     `;
 
@@ -604,7 +614,8 @@ onUnmounted(() => {
           </button>
 
           <div class="title">
-            <h1>Shop Tracker</h1>
+            <h1>Nearby Shops</h1>
+            <p>Discover stores around you</p>
           </div>
 
 
@@ -705,6 +716,9 @@ onUnmounted(() => {
                 </div>
 
                 <div class="info">
+                  <div v-if="selectedShop.isFeatured" class="featured-badge">
+                    <span class="featured-badge__star">★</span> Featured Seller
+                  </div>
                   <h3 class="name">{{ selectedShop.storeName || "Shop" }}</h3>
 
                   <div class="meta">
@@ -753,7 +767,7 @@ onUnmounted(() => {
             </div>
 
             <div class="grid">
-              <button v-for="shop in sortedShops" :key="shop._id" class="card" @click="
+              <button v-for="shop in sortedShops" :key="shop._id" class="card" :class="{ 'card--featured': shop.isFeatured }" @click="
                 selectShop(shop);
               viewMode = 'map';
               " type="button">
@@ -763,6 +777,7 @@ onUnmounted(() => {
                     <BuildingStorefrontIcon class="i" />
                   </div>
                   <span v-if="shop.distance !== undefined" class="badge">{{ formatDistance(shop.distance) }}</span>
+                  <span v-if="shop.isFeatured" class="badge badge--featured">★ Featured</span>
                 </div>
 
                 <div class="card-body">
@@ -1596,5 +1611,72 @@ onUnmounted(() => {
   box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
   outline: 4px solid rgba(37, 99, 235, 0.18);
   outline-offset: 2px;
+}
+
+/* ─── Featured Seller Styles ─────────────────────────────────── */
+
+/* Featured badge in panel */
+.featured-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  color: #78350f;
+  font-weight: 800;
+  font-size: 0.72rem;
+  letter-spacing: .02em;
+  margin-bottom: 4px;
+}
+.featured-badge__star { font-size: .8rem; }
+
+/* Featured card highlight */
+.card--featured {
+  border-color: rgba(245, 158, 11, .35) !important;
+  background: linear-gradient(180deg, rgba(245, 158, 11, .04), var(--bg)) !important;
+}
+.card--featured:hover {
+  border-color: rgba(245, 158, 11, .55) !important;
+  box-shadow: 0 8px 28px rgba(245, 158, 11, .12);
+}
+
+.badge--featured {
+  top: auto;
+  bottom: 10px;
+  left: 10px;
+  right: auto;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  color: #78350f;
+  font-size: .72rem;
+}
+
+/* Featured marker star */
+:deep(.feat-star) {
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  z-index: 10;
+  width: 18px;
+  height: 18px;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  color: #78350f;
+  box-shadow: 0 2px 8px rgba(245,158,11,.4);
+  border: 2px solid white;
+}
+
+:deep(.is-featured .avatar) {
+  box-shadow: 0 0 0 3px rgba(245,158,11,.25), 0 14px 34px rgba(0,0,0,.28);
+}
+
+:deep(.is-featured .label) {
+  opacity: 1;
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  color: #78350f;
+  border-color: rgba(245,158,11,.35);
 }
 </style>

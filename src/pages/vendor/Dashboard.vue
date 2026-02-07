@@ -14,6 +14,7 @@ import DashboardAnalytics from '../../components/vendor/views/DashboardAnalytics
 import { useVendorDashboardStore } from '../../stores/vendor/dashboardStores';
 import VendorProfile from '../../components/vendor/views/VendorProfile.vue';
 import Subscription from '../../components/vendor/views/Subscription.vue';
+import ShippingDiscounts from '../../components/vendor/views/ShippingDiscounts.vue';
 import ThemeToggle from '../../components/ThemeToggle.vue';
 
 const router = useRouter()
@@ -92,6 +93,7 @@ onUnmounted(() => {
         <Financials v-if="active === 'Financials'"></Financials>
         <Withdrawals v-if="active === 'Withdrawals'"></Withdrawals>
         <Subscription v-if="active === 'Subscription'"></Subscription>
+        <ShippingDiscounts v-if="active === 'Shipping Discounts'"></ShippingDiscounts>
         <Messages v-if="active === 'Messages'" @navigate="sample"></Messages>
         <Inventory v-if="active === 'Inventory'"></Inventory>
         <VendorProfile v-if="active === 'Profile'"></VendorProfile>

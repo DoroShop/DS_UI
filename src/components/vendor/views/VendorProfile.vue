@@ -1,6 +1,11 @@
+I'll enhance the Store Information section with a modern, clean UI that clearly distinguishes between editable and read-only fields. Here's the complete enhanced code:
+
+```vue
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from "vue";
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import { storeToRefs } from "pinia";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import {
   PencilSquareIcon,
   WalletIcon,
@@ -15,16 +20,23 @@ import {
   MapPinIcon,
   EnvelopeIcon,
   PhoneIcon,
+  LockClosedIcon,
+  CheckCircleIcon,
 } from "@heroicons/vue/24/outline";
+import { MapPinIcon as MapPinSolidIcon, SparklesIcon } from "@heroicons/vue/24/solid";
 import { useVendorDashboardStore } from "../../../stores/vendor/dashboardStores";
+import { useSubscriptionStore } from "../../../stores/vendor/subscriptionStore";
 import { formatToPHCurrency } from "../../../utils/currencyFormat";
+import { getAuthHeaders } from "../../../types/shared";
 import QRCodePaymentModal from "../../QRCodePaymentModal.vue";
 import { getQRCodeUrl } from "../../../utils/paymentApi";
+import axios from "axios";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
 /* ----------------------- Store ----------------------- */
 const store = useVendorDashboardStore();
+const subscriptionStore = useSubscriptionStore();
 const { vendor } = storeToRefs(store);
 const getStore = () => store;
 
@@ -40,6 +52,13 @@ onMounted(async () => {
     } catch (e) {
       console.warn("Failed to fetch withdrawals on mount", e);
     }
+  }
+
+  // Load subscription status
+  try {
+    await subscriptionStore.fetchSubscription();
+  } catch (e) {
+    console.warn("Failed to fetch subscription on mount", e);
   }
 
   // Restore any pending cash-in that wasn't completed
@@ -102,6 +121,259 @@ const editForm = reactive({
 });
 const editErrors = ref({});
 
+/* ─────────── Image Upload State ─────────── */
+const profileImageFile = ref(null);
+const bannerImageFile = ref(null);
+const profileImagePreview = ref("");
+const bannerImagePreview = ref("");
+const imageUploading = ref(false);
+
+const profileFileInput = ref(null);
+const bannerFileInput = ref(null);
+
+const handleProfileImageSelect = (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    window.alert("Please select a valid image file.");
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    window.alert("Image must be less than 5MB.");
+    return;
+  }
+  profileImageFile.value = file;
+  profileImagePreview.value = URL.createObjectURL(file);
+};
+
+const handleBannerImageSelect = (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    window.alert("Please select a valid image file.");
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    window.alert("Image must be less than 5MB.");
+    return;
+  }
+  bannerImageFile.value = file;
+  bannerImagePreview.value = URL.createObjectURL(file);
+};
+
+const removeProfileImage = () => {
+  profileImageFile.value = null;
+  profileImagePreview.value = "";
+  if (profileFileInput.value) profileFileInput.value.value = "";
+};
+
+const removeBannerImage = () => {
+  bannerImageFile.value = null;
+  bannerImagePreview.value = "";
+  if (bannerFileInput.value) bannerFileInput.value.value = "";
+};
+
+const uploadImage = async (file) => {
+  const formData = new FormData();
+  formData.append("image", file);
+  const res = await axios.post(`${API_BASE_URL}/upload/profile-image`, formData, {
+    headers: {
+      ...getAuthHeaders(),
+      "Content-Type": "multipart/form-data",
+    },
+  });
+  return res.data?.imageUrl || res.data?.url || "";
+};
+
+/* ─────────── Address API State ─────────── */
+const addressRegions = ref([]);
+const addressProvinces = ref([]);
+const addressCities = ref([]);
+const addressBarangays = ref([]);
+const addressLoading = ref(false);
+
+const selectedRegion = ref("");
+const selectedProvince = ref("");
+const selectedCity = ref("");
+const selectedBarangay = ref("");
+const addressZipCode = ref("");
+
+const fetchRegions = async () => {
+  try {
+    addressLoading.value = true;
+    const res = await axios.get(`${API_BASE_URL}/locations/regions`);
+    addressRegions.value = res.data?.data || res.data || [];
+  } catch (e) {
+    console.warn("Failed to fetch regions:", e);
+  } finally {
+    addressLoading.value = false;
+  }
+};
+
+const fetchProvinces = async (regionCode) => {
+  if (!regionCode) { addressProvinces.value = []; return; }
+  try {
+    addressLoading.value = true;
+    const res = await axios.get(`${API_BASE_URL}/locations/regions/${regionCode}/provinces`);
+    addressProvinces.value = res.data?.data || res.data || [];
+  } catch (e) {
+    console.warn("Failed to fetch provinces:", e);
+  } finally {
+    addressLoading.value = false;
+  }
+};
+
+const fetchCities = async (provinceCode) => {
+  if (!provinceCode) { addressCities.value = []; return; }
+  try {
+    addressLoading.value = true;
+    const res = await axios.get(`${API_BASE_URL}/locations/provinces/${provinceCode}/cities`);
+    addressCities.value = res.data?.data || res.data || [];
+  } catch (e) {
+    console.warn("Failed to fetch cities:", e);
+  } finally {
+    addressLoading.value = false;
+  }
+};
+
+const fetchBarangays = async (cityCode) => {
+  if (!cityCode) { addressBarangays.value = []; return; }
+  try {
+    addressLoading.value = true;
+    const res = await axios.get(`${API_BASE_URL}/locations/cities/${cityCode}/barangays`);
+    addressBarangays.value = res.data?.data || res.data || [];
+  } catch (e) {
+    console.warn("Failed to fetch barangays:", e);
+  } finally {
+    addressLoading.value = false;
+  }
+};
+
+const onRegionChange = (code) => {
+  selectedRegion.value = code;
+  selectedProvince.value = "";
+  selectedCity.value = "";
+  selectedBarangay.value = "";
+  addressProvinces.value = [];
+  addressCities.value = [];
+  addressBarangays.value = [];
+  editForm.province = "";
+  editForm.city = "";
+  editForm.barangay = "";
+
+  if (code) fetchProvinces(code);
+};
+
+const onProvinceChange = (code) => {
+  selectedProvince.value = code;
+  selectedCity.value = "";
+  selectedBarangay.value = "";
+  addressCities.value = [];
+  addressBarangays.value = [];
+
+  const prov = addressProvinces.value.find((p) => p.code === code);
+  editForm.province = prov?.name || "";
+  editForm.city = "";
+  editForm.barangay = "";
+
+  if (code) fetchCities(code);
+};
+
+const onCityChange = (code) => {
+  selectedCity.value = code;
+  selectedBarangay.value = "";
+  addressBarangays.value = [];
+
+  const city = addressCities.value.find((c) => c.code === code);
+  editForm.city = city?.name || "";
+  editForm.barangay = "";
+
+  // Auto-fill ZIP code from city data
+  if (city?.zipCode) {
+    addressZipCode.value = city.zipCode;
+  }
+
+  if (code) fetchBarangays(code);
+};
+
+const onBarangayChange = (code) => {
+  selectedBarangay.value = code;
+  const brgy = addressBarangays.value.find((b) => b.code === code);
+  editForm.barangay = brgy?.name || "";
+};
+
+/* ─────────── Manual Lat/Lng Input ─────────── */
+const manualLat = ref("");
+const manualLng = ref("");
+
+const applyManualCoords = () => {
+  const lat = parseFloat(manualLat.value);
+  const lng = parseFloat(manualLng.value);
+  if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    window.alert("Please enter valid coordinates. Latitude: -90 to 90, Longitude: -180 to 180.");
+    return;
+  }
+  editLocation.lat = lat;
+  editLocation.lng = lng;
+
+  const latlng = L.latLng(lat, lng);
+  if (locationMarker.value) {
+    locationMarker.value.setLatLng(latlng);
+  } else if (locationMap.value) {
+    locationMarker.value = L.marker(latlng, { draggable: true }).addTo(locationMap.value);
+    locationMarker.value.on("dragend", (ev) => {
+      const pos = ev.target.getLatLng();
+      editLocation.lat = pos.lat;
+      editLocation.lng = pos.lng;
+      manualLat.value = pos.lat.toFixed(6);
+      manualLng.value = pos.lng.toFixed(6);
+    });
+  }
+  locationMap.value?.setView(latlng, 15);
+};
+
+const gettingLocation = ref(false);
+
+const useCurrentLocation = () => {
+  if (!navigator.geolocation) {
+    window.alert("Geolocation is not supported by your browser.");
+    return;
+  }
+  gettingLocation.value = true;
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      editLocation.lat = lat;
+      editLocation.lng = lng;
+      manualLat.value = lat.toFixed(6);
+      manualLng.value = lng.toFixed(6);
+
+      const latlng = L.latLng(lat, lng);
+      if (locationMarker.value) {
+        locationMarker.value.setLatLng(latlng);
+      } else if (locationMap.value) {
+        locationMarker.value = L.marker(latlng, { draggable: true }).addTo(locationMap.value);
+        locationMarker.value.on("dragend", (ev) => {
+          const pos = ev.target.getLatLng();
+          editLocation.lat = pos.lat;
+          editLocation.lng = pos.lng;
+          manualLat.value = pos.lat.toFixed(6);
+          manualLng.value = pos.lng.toFixed(6);
+        });
+      }
+      locationMap.value?.setView(latlng, 15);
+      gettingLocation.value = false;
+    },
+    (err) => {
+      gettingLocation.value = false;
+      window.alert("Failed to get your location. Please ensure location access is enabled.");
+      console.warn("Geolocation error:", err);
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+};
+
 const openEditModal = () => {
   const v = vendor.value ?? {};
   Object.assign(editForm, {
@@ -119,12 +391,52 @@ const openEditModal = () => {
     zipCode: v.address?.zipCode || "",
   });
   editErrors.value = {};
+
+  // Reset image upload state
+  profileImageFile.value = null;
+  bannerImageFile.value = null;
+  profileImagePreview.value = v.imageUrl || "";
+  bannerImagePreview.value = v.bannerUrl || "";
+
+  // Reset address dropdowns
+  selectedRegion.value = "";
+  selectedProvince.value = "";
+  selectedCity.value = "";
+  selectedBarangay.value = "";
+  addressZipCode.value = v.address?.zipCode || "";
+  addressProvinces.value = [];
+  addressCities.value = [];
+  addressBarangays.value = [];
+
+  // Reset manual lat/lng
+  const loc = v.location;
+  if (loc?.coordinates?.length === 2) {
+    manualLat.value = loc.coordinates[1].toFixed(6);
+    manualLng.value = loc.coordinates[0].toFixed(6);
+  } else {
+    manualLat.value = "";
+    manualLng.value = "";
+  }
+
+  // Fetch regions for address dropdowns
+  fetchRegions();
+
   showEditModal.value = true;
 };
 
 const validateEdit = () => {
   const errs = {};
-  // Removed storeName validation
+  
+  // Validate email
+  if (editForm.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(editForm.email)) {
+    errs.email = "Please enter a valid email address";
+  }
+  
+  // Validate phone
+  if (editForm.phone && !/^[\d\s\-\+\(\)]+$/.test(editForm.phone)) {
+    errs.phone = "Please enter a valid phone number";
+  }
+  
   editErrors.value = errs;
   return Object.keys(errs).length === 0;
 };
@@ -132,26 +444,48 @@ const validateEdit = () => {
 const saveEdit = async () => {
   if (!validateEdit()) return;
 
-  const payload = {
-    // Excluded: storeName, description, email, phone, website
-    imageUrl: editForm.imageUrl.trim(),
-    bannerUrl: editForm.bannerUrl.trim(),
-    address: {
-      street: editForm.street.trim(),
-      barangay: editForm.barangay.trim(),
-      city: editForm.city.trim(),
-      province: editForm.province.trim(),
-      zipCode: editForm.zipCode.trim(),
-    },
-  };
-
   try {
+    imageUploading.value = true;
+
+    // Upload images if new files were selected
+    let finalImageUrl = editForm.imageUrl.trim();
+    let finalBannerUrl = editForm.bannerUrl.trim();
+
+    if (profileImageFile.value) {
+      finalImageUrl = await uploadImage(profileImageFile.value);
+    }
+    if (bannerImageFile.value) {
+      finalBannerUrl = await uploadImage(bannerImageFile.value);
+    }
+
+    const payload = {
+      imageUrl: finalImageUrl,
+      bannerUrl: finalBannerUrl,
+      email: editForm.email.trim(),
+      phone: editForm.phone.trim(),
+      description: editForm.description.trim(),
+      address: {
+        street: editForm.street.trim(),
+        barangay: editForm.barangay.trim(),
+        city: editForm.city.trim(),
+        province: editForm.province.trim(),
+        zipCode: addressZipCode.value.trim(),
+      },
+    };
+
+    // Include storeName if the vendor is approved
+    if (vendor.value?.isApproved) {
+      payload.storeName = editForm.storeName.trim();
+    }
+
     await getStore().updateVendor?.(payload);
+    showEditModal.value = false;
   } catch (err) {
     console.error("Vendor update failed:", err);
+    window.alert("Failed to update profile. Please try again.");
+  } finally {
+    imageUploading.value = false;
   }
-
-  showEditModal.value = false;
 };
 
 /* ------------------- Wallet -------------------------- */
@@ -427,6 +761,12 @@ const cancelWithdrawal = async (paymentId) => {
 const isLoading = computed(() => getStore().loading ?? false);
 const hasVendor = computed(() => !!vendor.value);
 
+/* ─── Navigate to Subscription page ─── */
+const goToSubscription = () => {
+  localStorage.setItem("activePageVendorDashboard", "Subscription");
+  window.location.reload();
+};
+
 /* -------------------- Wallet UI Helpers ---------------- */
 const isBankDetailsRequired = computed(() => {
   return actionType.value === "withdraw";
@@ -436,6 +776,205 @@ const walletModalTitle = computed(() => (actionType.value === "cashin" ? "Cash I
 const walletModalSubtitle = computed(() => {
   if (actionType.value === "cashin") return "Top up your wallet via QRPH (scan QR).";
   return "Withdraw via GCash or PayMaya.";
+});
+
+/* ─────────── Pinned Products (Subscription Benefit) ─────────── */
+const pinnedProducts = ref([]);
+const pinnedLoading = ref(false);
+const showPinModal = ref(false);
+const pinningProductId = ref(null);
+
+const approvedProducts = computed(() => {
+  const prods = getStore().vendorProducts || [];
+  return prods.filter(
+    (p) => p.status === "approved" && !p.isDisabled
+  );
+});
+
+const unpinnedProducts = computed(() => {
+  const pinnedIds = new Set(pinnedProducts.value.map((p) => String(p._id)));
+  return approvedProducts.value.filter((p) => !pinnedIds.has(String(p._id)));
+});
+
+const canPin = computed(() => pinnedProducts.value.length < 3);
+
+const isSubscribed = computed(() => {
+  return subscriptionStore.isSubscribed;
+});
+
+const loadPinnedProducts = async () => {
+  pinnedLoading.value = true;
+  try {
+    pinnedProducts.value = await getStore().getPinnedProducts();
+  } catch (e) {
+    console.warn("Failed to load pinned products:", e);
+  } finally {
+    pinnedLoading.value = false;
+  }
+};
+
+const handlePinProduct = async (productId) => {
+  pinningProductId.value = productId;
+  try {
+    await getStore().pinProduct(productId);
+    await loadPinnedProducts();
+    showPinModal.value = false;
+  } catch (e) {
+    // Error already shown by store
+  } finally {
+    pinningProductId.value = null;
+  }
+};
+
+const handleUnpinProduct = async (productId) => {
+  pinningProductId.value = productId;
+  try {
+    await getStore().unpinProduct(productId);
+    await loadPinnedProducts();
+  } catch (e) {
+    // Error already shown by store
+  } finally {
+    pinningProductId.value = null;
+  }
+};
+
+/* ─────────── Map Location Picker ─────────── */
+const locationMapContainer = ref(null);
+const locationMap = ref(null);
+const locationMarker = ref(null);
+const editLocation = reactive({ lat: null, lng: null });
+const locationSaving = ref(false);
+
+const currentLocation = computed(() => {
+  const loc = vendor.value?.location;
+  if (loc?.coordinates?.length === 2) {
+    return { lng: loc.coordinates[0], lat: loc.coordinates[1] };
+  }
+  return null;
+});
+
+const initLocationMap = () => {
+  if (locationMap.value) return;
+  nextTick(() => {
+    const container = locationMapContainer.value;
+    if (!container) return;
+
+    const center = currentLocation.value
+      ? [currentLocation.value.lat, currentLocation.value.lng]
+      : [12.5, 121.0]; // Default to Mindoro area
+
+    const zoom = currentLocation.value ? 15 : 9;
+
+    locationMap.value = L.map(container, {
+      center,
+      zoom,
+      zoomControl: true,
+    });
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap",
+      maxZoom: 19,
+    }).addTo(locationMap.value);
+
+    if (currentLocation.value) {
+      editLocation.lat = currentLocation.value.lat;
+      editLocation.lng = currentLocation.value.lng;
+      manualLat.value = currentLocation.value.lat.toFixed(6);
+      manualLng.value = currentLocation.value.lng.toFixed(6);
+      locationMarker.value = L.marker([currentLocation.value.lat, currentLocation.value.lng], {
+        draggable: true,
+      }).addTo(locationMap.value);
+
+      locationMarker.value.on("dragend", (e) => {
+        const pos = e.target.getLatLng();
+        editLocation.lat = pos.lat;
+        editLocation.lng = pos.lng;
+        manualLat.value = pos.lat.toFixed(6);
+        manualLng.value = pos.lng.toFixed(6);
+      });
+    }
+
+    locationMap.value.on("click", (e) => {
+      editLocation.lat = e.latlng.lat;
+      editLocation.lng = e.latlng.lng;
+      manualLat.value = e.latlng.lat.toFixed(6);
+      manualLng.value = e.latlng.lng.toFixed(6);
+
+      if (locationMarker.value) {
+        locationMarker.value.setLatLng(e.latlng);
+      } else {
+        locationMarker.value = L.marker(e.latlng, { draggable: true }).addTo(locationMap.value);
+        locationMarker.value.on("dragend", (ev) => {
+          const pos = ev.target.getLatLng();
+          editLocation.lat = pos.lat;
+          editLocation.lng = pos.lng;
+          manualLat.value = pos.lat.toFixed(6);
+          manualLng.value = pos.lng.toFixed(6);
+        });
+      }
+    });
+
+    // Handle map resize when modal opens
+    setTimeout(() => locationMap.value?.invalidateSize(), 200);
+  });
+};
+
+const destroyLocationMap = () => {
+  if (locationMap.value) {
+    locationMap.value.remove();
+    locationMap.value = null;
+    locationMarker.value = null;
+    editLocation.lat = null;
+    editLocation.lng = null;
+  }
+};
+
+const saveShopLocation = async () => {
+  if (editLocation.lat == null || editLocation.lng == null) return;
+  locationSaving.value = true;
+  try {
+    await getStore().updateShopLocation(editLocation.lat, editLocation.lng);
+  } catch (e) {
+    // Error shown in store
+  } finally {
+    locationSaving.value = false;
+  }
+};
+
+const removeShopLocation = async () => {
+  if (!confirm("Remove your shop's map location?")) return;
+  locationSaving.value = true;
+  try {
+    await getStore().removeShopLocation();
+    if (locationMarker.value) {
+      locationMarker.value.remove();
+      locationMarker.value = null;
+    }
+    editLocation.lat = null;
+    editLocation.lng = null;
+  } catch (e) {
+    // Error shown in store
+  } finally {
+    locationSaving.value = false;
+  }
+};
+
+// Watch edit modal to init/destroy map
+watch(showEditModal, (val) => {
+  if (val) {
+    nextTick(() => initLocationMap());
+  } else {
+    destroyLocationMap();
+  }
+});
+
+// Load pinned products on mount
+onMounted(async () => {
+  await loadPinnedProducts();
+});
+
+onUnmounted(() => {
+  destroyLocationMap();
 });
 </script>
 
@@ -771,104 +1310,280 @@ const walletModalSubtitle = computed(() => {
             </header>
 
             <form class="modal__body" @submit.prevent="saveEdit">
-              <!-- Store Basic Info -->
+
+              <!-- ─── Section 1: Store Information (ENHANCED) ─── -->
               <div class="formBlock">
-                <div class="formBlock__title">Store Information</div>
-                <div class="cols">
-                  <div class="field">
-                    <label class="label">Store Name</label>
-                    <input v-model="editForm.storeName" class="input" :class="{ 'input--err': editErrors.storeName }" placeholder="Enter store name" readonly />
-                    <p v-if="editErrors.storeName" class="err">{{ editErrors.storeName }}</p>
-                  </div>
-                  <div class="field">
-                    <label class="label">Email</label>
-                    <input v-model="editForm.email" type="email" class="input" placeholder="store@example.com" readonly />
-                  </div>
+                <div class="formBlock__header">
+                  <div class="formBlock__dot"></div>
+                  <div class="formBlock__title">Store Information</div>
                 </div>
+                <div class="formBlock__content">
+                  
+                  <!-- Read-Only Fields Grid -->
+                  <div class="infoGrid">
+                    <!-- Store Name -->
+                    <div class="infoCard infoCard--locked">
+                      <div class="infoCard__header">
+                        <div class="infoCard__icon infoCard__icon--locked">
+                          <LockClosedIcon class="ico-sm" />
+                        </div>
+                        <div class="infoCard__label">
+                          <span class="infoCard__title">Store Name</span>
+                          <span class="infoCard__badge infoCard__badge--locked">Read-only</span>
+                        </div>
+                      </div>
+                      <div class="infoCard__value">{{ editForm.storeName || 'Not set' }}</div>
+                      <div class="infoCard__hint">
+                        <span v-if="!vendor?.isApproved">Editable after shop approval</span>
+                        <span v-else>Contact support to change store name</span>
+                      </div>
+                    </div>
 
-                <div class="cols" style="margin-top: 12px;">
-                  <div class="field">
-                    <label class="label">Phone</label>
-                    <input v-model="editForm.phone" class="input" placeholder="+63 9XX XXX XXXX" readonly />
+                    <!-- Address -->
+                    <div class="infoCard infoCard--locked">
+                      <div class="infoCard__header">
+                        <div class="infoCard__icon infoCard__icon--locked">
+                          <MapPinIcon class="ico-sm" />
+                        </div>
+                        <div class="infoCard__label">
+                          <span class="infoCard__title">Store Address</span>
+                          <span class="infoCard__badge infoCard__badge--locked">Read-only</span>
+                        </div>
+                      </div>
+                      <div class="infoCard__value infoCard__value--multiline">
+                        {{ fullAddress || 'No address set' }}
+                      </div>
+                      <div class="infoCard__hint">Update address in the Address section below</div>
+                    </div>
                   </div>
-                  <div class="field">
-                    <label class="label">Website</label>
-                    <input v-model="editForm.website" class="input" placeholder="https://yourstore.com" readonly />
-                  </div>
-                </div>
 
-                <div class="field" style="margin-top: 12px;">
-                  <label class="label">Description</label>
-                  <textarea v-model="editForm.description" class="textarea" rows="3" placeholder="Tell customers about your store..." readonly></textarea>
+                  <!-- Editable Fields -->
+                  <div class="editableSection">
+                    <div class="editableSection__header">
+                      <CheckCircleIcon class="ico-sm" style="color: var(--primary);" />
+                      <span>Editable Contact Information</span>
+                    </div>
+
+                    <div class="cols" style="margin-top: 14px;">
+                      <!-- Email -->
+                      <div class="field">
+                        <label class="label">
+                          <EnvelopeIcon class="ico-sm" style="opacity: 0.6; vertical-align: -2px; margin-right: 4px;" />
+                          Email Address
+                          <span class="label__badge label__badge--ok">Editable</span>
+                        </label>
+                        <input
+                          v-model="editForm.email"
+                          type="email"
+                          class="input input--editable"
+                          :class="{ 'input--err': editErrors.email }"
+                          placeholder="store@example.com"
+                        />
+                        <p v-if="editErrors.email" class="err">{{ editErrors.email }}</p>
+                        <p v-else class="hint">Customer inquiries will be sent here</p>
+                      </div>
+
+                      <!-- Phone -->
+                      <div class="field">
+                        <label class="label">
+                          <PhoneIcon class="ico-sm" style="opacity: 0.6; vertical-align: -2px; margin-right: 4px;" />
+                          Phone Number
+                          <span class="label__badge label__badge--ok">Editable</span>
+                        </label>
+                        <input
+                          v-model="editForm.phone"
+                          type="tel"
+                          class="input input--editable"
+                          :class="{ 'input--err': editErrors.phone }"
+                          placeholder="+63 9XX XXX XXXX"
+                        />
+                        <p v-if="editErrors.phone" class="err">{{ editErrors.phone }}</p>
+                        <p v-else class="hint">Customers can reach you at this number</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Description (Editable) -->
+                  <div class="field" style="margin-top: 14px;">
+                    <label class="label">
+                      Store Description
+                      <span class="label__badge label__badge--ok">Editable</span>
+                    </label>
+                    <textarea
+                      v-model="editForm.description"
+                      class="textarea"
+                      placeholder="Tell customers about your store, products, and services..."
+                      rows="4"
+                    ></textarea>
+                    <p class="hint">{{ editForm.description.length }} / 500 characters</p>
+                  </div>
+
                 </div>
               </div>
 
-              <!-- Image URLs -->
+              <!-- ─── Section 2: Store Images (File Upload) ─── -->
               <div class="formBlock">
-                <div class="formBlock__title">Store Images</div>
-                <div class="cols">
-                  <div class="field">
-                    <label class="label">Profile Image URL</label>
-                    <input v-model="editForm.imageUrl" class="input" placeholder="https://..." />
-                    <p class="hint">Square image recommended (400x400px)</p>
-                  </div>
-                  <div class="field">
-                    <label class="label">Banner Image URL</label>
-                    <input v-model="editForm.bannerUrl" class="input" placeholder="https://..." />
-                    <p class="hint">Wide image recommended (1200x400px)</p>
-                  </div>
+                <div class="formBlock__header">
+                  <div class="formBlock__dot"></div>
+                  <div class="formBlock__title">Store Images</div>
                 </div>
+                <div class="formBlock__content">
+                  <div class="imgUploadRow">
+                    <!-- Profile Image Upload -->
+                    <div class="imgUploadCard">
+                      <div class="imgUploadCard__preview" @click="profileFileInput?.click()">
+                        <img v-if="profileImagePreview" :src="profileImagePreview" alt="Profile Preview" class="imgUploadCard__img" />
+                        <div v-else class="imgUploadCard__placeholder">
+                          <CameraIcon class="ico" style="width: 28px; height: 28px; opacity: 0.4;" />
+                          <span>Profile Image</span>
+                        </div>
+                        <div class="imgUploadCard__overlay">
+                          <CameraIcon class="ico" />
+                          <span>Change</span>
+                        </div>
+                      </div>
+                      <input ref="profileFileInput" type="file" accept="image/*" style="display: none;" @change="handleProfileImageSelect" />
+                      <div class="imgUploadCard__info">
+                        <span class="imgUploadCard__label">Profile Image</span>
+                        <span class="hint">Square, 400x400px</span>
+                      </div>
+                      <button v-if="profileImageFile" type="button" class="imgUploadCard__remove" @click="removeProfileImage" aria-label="Remove">
+                        <XMarkIcon class="ico-sm" />
+                      </button>
+                    </div>
 
-                <!-- Image Previews -->
-                <div v-if="editForm.imageUrl || editForm.bannerUrl" class="imgPreviews">
-                  <div v-if="editForm.imageUrl" class="imgPreview">
-                    <img :src="editForm.imageUrl" alt="Profile Preview" @error="(e) => e.target.style.display='none'" />
-                    <span>Profile</span>
-                  </div>
-                  <div v-if="editForm.bannerUrl" class="imgPreview imgPreview--wide">
-                    <img :src="editForm.bannerUrl" alt="Banner Preview" @error="(e) => e.target.style.display='none'" />
-                    <span>Banner</span>
+                    <!-- Banner Image Upload -->
+                    <div class="imgUploadCard imgUploadCard--wide">
+                      <div class="imgUploadCard__preview imgUploadCard__preview--wide" @click="bannerFileInput?.click()">
+                        <img v-if="bannerImagePreview" :src="bannerImagePreview" alt="Banner Preview" class="imgUploadCard__img" />
+                        <div v-else class="imgUploadCard__placeholder">
+                          <CameraIcon class="ico" style="width: 28px; height: 28px; opacity: 0.4;" />
+                          <span>Banner Image</span>
+                        </div>
+                        <div class="imgUploadCard__overlay">
+                          <CameraIcon class="ico" />
+                          <span>Change</span>
+                        </div>
+                      </div>
+                      <input ref="bannerFileInput" type="file" accept="image/*" style="display: none;" @change="handleBannerImageSelect" />
+                      <div class="imgUploadCard__info">
+                        <span class="imgUploadCard__label">Banner Image</span>
+                        <span class="hint">Wide, 1200x400px</span>
+                      </div>
+                      <button v-if="bannerImageFile" type="button" class="imgUploadCard__remove" @click="removeBannerImage" aria-label="Remove">
+                        <XMarkIcon class="ico-sm" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <!-- Address -->
+              <!-- ─── Section 3: Store Address (Read-Only) ─── -->
               <div class="formBlock">
-                <div class="formBlock__title">Store Address</div>
-                <div class="cols">
-                  <div class="field">
-                    <label class="label">Street Address</label>
-                    <input v-model="editForm.street" class="input" placeholder="123 Main Street" />
-                  </div>
-                  <div class="field">
-                    <label class="label">Barangay</label>
-                    <input v-model="editForm.barangay" class="input" placeholder="Barangay name" />
+                <div class="formBlock__header">
+                  <div class="formBlock__dot"></div>
+                  <div class="formBlock__title">Store Address</div>
+                </div>
+                <div class="formBlock__content">
+                  <p class="hint" style="margin-bottom: 12px;">Your store address cannot be edited. Contact support if you need to update it.</p>
+                  
+                  <div class="addressReadOnly">
+                    <MapPinIcon class="ico-sm" style="color: var(--primary); flex-shrink: 0;" />
+                    <div class="addressReadOnly__text">
+                      <p v-if="vendor?.address && (vendor.address.street || vendor.address.city || vendor.address.province)">
+                        {{ [vendor.address.street, vendor.address.barangay, vendor.address.city, vendor.address.province, vendor.address.zipCode].filter(Boolean).join(', ') }}
+                      </p>
+                      <p v-else style="margin: 0; color: var(--muted);">No address set</p>
+                    </div>
                   </div>
                 </div>
+              </div>
 
-                <div class="cols" style="margin-top: 12px;">
-                  <div class="field">
-                    <label class="label">City/Municipality</label>
-                    <input v-model="editForm.city" class="input" placeholder="City name" />
-                  </div>
-                  <div class="field">
-                    <label class="label">Province</label>
-                    <input v-model="editForm.province" class="input" placeholder="Province name" />
+              <!-- ─── Section 4: Shop Map Location (Subscription Gated) ─── -->
+              <div class="formBlock">
+                <div class="formBlock__header">
+                  <div class="formBlock__dot"></div>
+                  <div class="formBlock__title">
+                    <MapPinSolidIcon class="ico" style="color: var(--primary); margin-right: 6px; vertical-align: -3px;" />
+                    Shop Map Location
                   </div>
                 </div>
+                <div class="formBlock__content">
 
-                <div class="field" style="margin-top: 12px; max-width: 200px;">
-                  <label class="label">ZIP Code</label>
-                  <input v-model="editForm.zipCode" class="input" placeholder="e.g., 5200" />
+                  <!-- Subscription Gate for map -->
+                  <div v-if="!isSubscribed" class="subGate">
+                    <div class="subGate__icon">
+                      <MapPinSolidIcon class="ico" />
+                    </div>
+                    <h3 class="subGate__title">Subscribe to Pin Your Shop</h3>
+                    <p class="subGate__desc">Show your store on the Nearby Shops map so customers can find you easily. This feature requires an active subscription.</p>
+                    <button type="button" class="btn btn--primary btn--sm" style="margin-top: 8px;" @click="goToSubscription">
+                      View Subscription Plans
+                    </button>
+                  </div>
+
+                  <!-- Subscribed: Full map location picker -->
+                  <template v-else>
+                    <p class="hint" style="margin-bottom: 10px;">
+                      Set your shop's location using the map, by entering coordinates, or using your current GPS location.
+                    </p>
+
+                    <!-- Manual Coordinates + GPS Button -->
+                    <div class="coordRow">
+                      <div class="field" style="flex: 1;">
+                        <label class="label">Latitude</label>
+                        <input v-model="manualLat" class="input input--mono" placeholder="e.g. 12.879721" type="text" />
+                      </div>
+                      <div class="field" style="flex: 1;">
+                        <label class="label">Longitude</label>
+                        <input v-model="manualLng" class="input input--mono" placeholder="e.g. 121.053886" type="text" />
+                      </div>
+                      <div class="coordRow__actions">
+                        <button type="button" class="btn btn--sm" @click="applyManualCoords" :disabled="!manualLat || !manualLng">
+                          Apply
+                        </button>
+                        <button type="button" class="btn btn--primary btn--sm" @click="useCurrentLocation" :disabled="gettingLocation">
+                          {{ gettingLocation ? 'Locating...' : 'Use My Location' }}
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Map -->
+                    <div ref="locationMapContainer" class="locationMap"></div>
+
+                    <div v-if="editLocation.lat != null" class="locationCoords">
+                      <span>Lat: {{ editLocation.lat?.toFixed(6) }}, Lng: {{ editLocation.lng?.toFixed(6) }}</span>
+                    </div>
+
+                    <div class="locationActions">
+                      <button
+                        type="button"
+                        class="btn btn--primary btn--sm"
+                        :disabled="editLocation.lat == null || locationSaving"
+                        @click="saveShopLocation"
+                      >
+                        {{ locationSaving ? 'Saving...' : 'Save Location' }}
+                      </button>
+                      <button
+                        v-if="currentLocation"
+                        type="button"
+                        class="btn btn--ghost btn--sm"
+                        :disabled="locationSaving"
+                        @click="removeShopLocation"
+                      >
+                        Remove Location
+                      </button>
+                    </div>
+                  </template>
                 </div>
               </div>
 
               <footer class="modal__foot modal__foot--sticky">
-                <button type="button" class="btn btn--muted" @click="showEditModal = false">
+                <button type="button" class="btn btn--muted" @click="showEditModal = false" :disabled="imageUploading">
                   Cancel
                 </button>
-                <button type="submit" class="btn btn--primary">
-                  Save Changes
+                <button type="submit" class="btn btn--primary" :disabled="imageUploading">
+                  {{ imageUploading ? 'Uploading...' : 'Save Changes' }}
                 </button>
               </footer>
             </form>
@@ -1303,9 +2018,11 @@ const walletModalSubtitle = computed(() => {
 .btn--primary {
   background: linear-gradient(180deg, var(--primary) 0%, var(--primary2) 100%);
   border-color: rgba(34,197,94,0.35);
-  color: #07110a;
+  background: linear-gradient(180deg, #2ee071 0%, #1ab256 100%);
+  color: var(--text-primary);
+  transition: all 300ms;
 }
-.btn--primary:hover { background: linear-gradient(180deg, #2ee071 0%, #1ab256 100%); }
+.btn--primary:hover { opacity: .75 }
 
 .btn--muted {
   background: rgba(255,255,255,0.06);
@@ -1395,6 +2112,7 @@ const walletModalSubtitle = computed(() => {
 
 .modal__body {
   padding: 14px;
+  padding-bottom: 0;
   max-height: 72vh;
   overflow: auto;
 }
@@ -1404,11 +2122,12 @@ const walletModalSubtitle = computed(() => {
   gap: 10px;
   padding: 12px 14px;
   border-top: 1px solid rgba(255,255,255,0.10);
-  background: rgba(255,255,255,0.03);
+  background: var(--surface);
 }
 .modal__foot--sticky {
   position: sticky;
   bottom: -1px;
+  background: var(--surface);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1449,125 +2168,747 @@ const walletModalSubtitle = computed(() => {
   font-family: inherit;
 }
 .input:focus, .textarea:focus, select.input:focus {
-  border-color: rgba(34,197,94,0.55);
-  background: rgba(2, 6, 23, 0.75);
+  border-color: rgba(34,197,94,0.55);background: rgba(2, 6, 23, 0.75);
 }
 .input--err { border-color: rgba(239, 68, 68, 0.60) !important; }
 .hint { font-size: 12px; color: var(--muted2); }
 .err { font-size: 12px; color: #fb7185; margin: 0; }
-
 /* Image Previews */
 .imgPreviews {
-  display: flex;
-  gap: 12px;
-  margin-top: 14px;
-  flex-wrap: wrap;
+display: flex;
+gap: 12px;
+margin-top: 14px;
+flex-wrap: wrap;
 }
 .imgPreview {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
+display: flex;
+flex-direction: column;
+align-items: center;
+gap: 6px;
 }
 .imgPreview img {
-  width: 80px;
-  height: 80px;
-  object-fit: cover;
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.12);
+width: 80px;
+height: 80px;
+object-fit: cover;
+border-radius: 12px;
+border: 1px solid rgba(255,255,255,0.12);
 }
 .imgPreview--wide img {
-  width: 160px;
-  height: 60px;
+width: 160px;
+height: 60px;
 }
 .imgPreview span {
-  font-size: 11px;
-  color: var(--muted);
+font-size: 11px;
+color: var(--muted);
 }
 .err--block {
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(251,113,133,0.35);
-  background: rgba(251,113,133,0.10);
+padding: 10px 12px;
+border-radius: 12px;
+border: 1px solid rgba(251,113,133,0.35);
+background: rgba(251,113,133,0.10);
 }
-
-/* ------------------------------------------------------------------ */
-/*  QR */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ /
+/  QR /
+/ ------------------------------------------------------------------ */
 .qrBox {
-  padding: 12px;
-  border-radius: var(--r);
-  border: 1px solid rgba(255,255,255,0.10);
-  background: rgba(2, 6, 23, 0.45);
+padding: 12px;
+border-radius: var(--r);
+border: 1px solid rgba(255,255,255,0.10);
+background: rgba(2, 6, 23, 0.45);
 }
 .qrBox__title {
-  font-weight: 900;
-  letter-spacing: -0.01em;
+font-weight: 900;
+letter-spacing: -0.01em;
 }
 .qrBox__img {
-  margin-top: 12px;
-  display: grid;
-  place-items: center;
-  padding: 12px;
-  border-radius: var(--r);
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.10);
+margin-top: 12px;
+display: grid;
+place-items: center;
+padding: 12px;
+border-radius: var(--r);
+background: rgba(255,255,255,0.06);
+border: 1px solid rgba(255,255,255,0.10);
 }
 .qrBox__img img {
-  width: min(320px, 100%);
-  height: auto;
-  border-radius: 12px;
-  background: white;
-  padding: 10px;
+width: min(320px, 100%);
+height: auto;
+border-radius: 12px;
+background: white;
+padding: 10px;
 }
 .qrBox__hint { margin-top: 10px; color: var(--muted); font-size: 12px; }
 .qrBox__actions {
-  margin-top: 12px;
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 10px;
+margin-top: 12px;
+display: grid;
+grid-template-columns: 1fr 1fr 1fr;
+gap: 10px;
 }
-
-/* ------------------------------------------------------------------ */
-/*  EMPTY */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ /
+/  EMPTY /
+/ ------------------------------------------------------------------ */
 .empty {
-  padding: 18px;
-  border-radius: var(--r-lg);
-  border: 1px solid rgba(255,255,255,0.10);
-  background: rgba(255,255,255,0.06);
-  box-shadow: var(--shadow);
+padding: 18px;
+border-radius: var(--r-lg);
+border: 1px solid rgba(255,255,255,0.10);
+background: rgba(255,255,255,0.06);
+box-shadow: var(--shadow);
 }
-
-/* ------------------------------------------------------------------ */
-/*  ANIM */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ /
+/  ANIM /
+/ ------------------------------------------------------------------ */
 .fade-enter-active, .fade-leave-active { transition: all 0.18s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(10px) scale(0.99); }
-
-/* ------------------------------------------------------------------ */
-/*  RESPONSIVE */
-/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ /
+/  RESPONSIVE /
+/ ------------------------------------------------------------------ */
 @media (max-width: 980px) {
-  .grid { grid-template-columns: 1fr; }
+.grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
-  .sk-grid { grid-template-columns: 1fr; }
-  .hero__content { align-items: flex-end; flex-direction: column; }
-  .hero__left { width: 100%; align-items: flex-end; }
-  .hero__right { width: 100%; }
-  .actions { grid-template-columns: 1fr; }
-  .balances { grid-template-columns: 1fr; }
-  .stats { grid-template-columns: 1fr; }
-  .cols, .cols--3 { grid-template-columns: 1fr; }
+.sk-grid { grid-template-columns: 1fr; }
+.hero__content { align-items: flex-end; flex-direction: column; }
+.hero__left { width: 100%; align-items: flex-end; }
+.hero__right { width: 100%; }
+.actions { grid-template-columns: 1fr; }
+.balances { grid-template-columns: 1fr; }
+.stats { grid-template-columns: 1fr; }
+.cols, .cols--3 { grid-template-columns: 1fr; }
+/* Bottom-sheet modal feel on mobile */
+.backdrop { align-items: flex-end; }
+.modal {
+border-radius: 18px 18px 0 0;
+max-width: 100%;
+}
+.modal__body { max-height: 78vh; }
+.qrBox__actions { grid-template-columns: 1fr; }
+}
+/* ─── Pinned Products ─────────────────────────────────────────── */
+.pinnedList { display: flex; flex-direction: column; gap: 10px; }
+.pinnedEmpty {
+text-align: center; padding: 28px 16px;
+color: var(--muted);
+}
+.pinnedEmpty__icon {
+width: 40px; height: 40px;
+color: var(--primary);
+margin: 0 auto 10px;
+opacity: .5;
+}
+.pinnedItem {
+display: flex; align-items: center; gap: 12px;
+padding: 10px 14px;
+background: var(--card);
+border: 1px solid var(--border);
+border-radius: var(--r-sm);
+transition: background .15s;
+}
+.pinnedItem:hover { background: rgba(255,255,255,.08); }
+.pinnedItem__img {
+width: 48px; height: 48px;
+border-radius: 8px;
+object-fit: cover;
+background: rgba(255,255,255,.04);
+flex-shrink: 0;
+}
+.pinnedItem__info { flex: 1; min-width: 0; }
+.pinnedItem__name {
+font-weight: 600; font-size: .9rem;
+white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pinnedItem__price { font-size: .8rem; color: var(--primary); margin-top: 2px; }
+.pinnedCounter {
+text-align: right; font-size: .78rem; color: var(--muted2);
+margin-top: 8px; padding-right: 4px;
+}
+/* Pin select modal list */
+.pinSelectList { display: flex; flex-direction: column; gap: 6px; max-height: 400px; overflow-y: auto; }
+.pinSelectItem {
+display: flex; align-items: center; gap: 12px;
+padding: 10px 14px;
+border-radius: var(--r-sm);
+cursor: pointer;
+transition: background .15s;
+border: 1px solid var(--border);
+}
+.pinSelectItem:hover { background: rgba(34,197,94,.08); border-color: var(--primary); }
+.pinSelectItem--disabled { opacity: .5; pointer-events: none; }
+.pinSelectItem__img {
+width: 42px; height: 42px;
+border-radius: 8px;
+object-fit: cover;
+background: rgba(255,255,255,.04);
+flex-shrink: 0;
+}
+.pinSelectItem__info { flex: 1; min-width: 0; }
+.pinSelectItem__name {
+font-weight: 600; font-size: .85rem;
+white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pinSelectItem__meta { font-size: .78rem; color: var(--muted); margin-top: 2px; }
+.pinSelectItem__action {
+font-size: .8rem; font-weight: 600;
+color: var(--primary);
+flex-shrink: 0;
+}
+/* ─── Map Location Picker ─────────────────────────────────────── */
+.locationMap {
+width: 100%;
+height: 280px;
+border-radius: var(--r-sm);
+border: 1px solid var(--border);
+overflow: hidden;
+z-index: 0;
+}
+.locationCoords {
+margin-top: 8px;
+font-size: .8rem;
+color: var(--muted);
+font-family: monospace;
+}
+.locationActions {
+display: flex; gap: 8px;
+margin-top: 10px;
+}
+/* ─── Subscription Gate ─────────────────────────────────────── */
+.subGate {
+display: flex;
+flex-direction: column;
+align-items: center;
+text-align: center;
+padding: 32px 20px;
+border-radius: var(--r);
+border: 1px dashed rgba(34, 197, 94, 0.25);
+background: rgba(34, 197, 94, 0.04);
+}
+.subGate__icon {
+width: 48px;
+height: 48px;
+border-radius: 14px;
+display: grid;
+place-items: center;
+background: rgba(34, 197, 94, 0.12);
+border: 1px solid rgba(34, 197, 94, 0.20);
+color: var(--primary);
+margin-bottom: 12px;
+}
+.subGate__icon .ico { width: 24px; height: 24px; }
+.subGate__title {
+margin: 0 0 6px;
+font-size: 15px;
+font-weight: 700;
+letter-spacing: -0.01em;
+}
+.subGate__desc {
+margin: 0;
+font-size: 13px;
+color: var(--muted);
+max-width: 380px;
+line-height: 1.45;
+}
+/* ─── Form Block Redesigned ─────────────────────────────────── */
+.formBlock__header {
+display: flex;
+align-items: center;
+gap: 10px;
+margin-bottom: 12px;
+}
+.formBlock__dot {
+width: 6px;
+height: 6px;
+border-radius: 50%;
+background: var(--primary);
+flex-shrink: 0;
+}
+.formBlock__content {
+padding-left: 16px;
+border-left: 1px solid rgba(255, 255, 255, 0.06);
+}
+/* ─── Label Badges ──────────────────────────────────────────── */
+.label__badge {
+display: inline-block;
+font-size: 10px;
+font-weight: 600;
+text-transform: uppercase;
+padding: 2px 6px;
+border-radius: 4px;
+background: rgba(255, 255, 255, 0.08);
+border: 1px solid rgba(255, 255, 255, 0.10);
+color: var(--muted2);
+margin-left: 6px;
+vertical-align: middle;
+letter-spacing: 0.03em;
+}
+.label__badge--ok {
+background: rgba(34, 197, 94, 0.10);
+border-color: rgba(34, 197, 94, 0.20);
+color: var(--primary);
+}
+.input--readonly {
+opacity: 0.65;
+cursor: not-allowed;
+}
+.input--mono {
+font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+font-size: 13px;
+letter-spacing: 0.02em;
+}
+/* ─── Image Upload Cards ────────────────────────────────────── */
+.imgUploadRow {
+display: flex;
+gap: 14px;
+flex-wrap: wrap;
+}
+.imgUploadCard {
+position: relative;
+flex: 0 0 auto;
+}
+.imgUploadCard--wide { flex: 1 1 auto; min-width: 200px; }
+.imgUploadCard__preview {
+width: 100px;
+height: 100px;
+border-radius: var(--r-sm);
+border: 2px dashed rgba(255, 255, 255, 0.14);
+overflow: hidden;
+cursor: pointer;
+position: relative;
+display: flex;
+align-items: center;
+justify-content: center;
+background: rgba(2, 6, 23, 0.45);
+transition: border-color 0.15s ease, background 0.15s ease;
+}
+.imgUploadCard__preview:hover {
+border-color: rgba(34, 197, 94, 0.40);
+background: rgba(34, 197, 94, 0.04);
+}
+.imgUploadCard__preview--wide {
+width: 100%;
+height: 100px;
+}
+.imgUploadCard__img {
+width: 100%;
+height: 100%;
+object-fit: cover;
+}
+.imgUploadCard__placeholder {
+display: flex;
+flex-direction: column;
+align-items: center;
+gap: 4px;
+color: var(--muted2);
+font-size: 11px;
+}
+.imgUploadCard__overlay {
+position: absolute;
+inset: 0;
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+gap: 4px;
+background: rgba(0, 0, 0, 0.55);
+color: white;
+font-size: 11px;
+font-weight: 600;
+opacity: 0;
+transition: opacity 0.15s ease;
+}
+.imgUploadCard__preview:hover .imgUploadCard__overlay {
+opacity: 1;
+}
+.imgUploadCard__info {
+margin-top: 6px;
+display: flex;
+flex-direction: column;
+gap: 2px;
+}
+.imgUploadCard__label {
+font-size: 12px;
+font-weight: 600;
+color: rgba(255, 255, 255, 0.8);
+}
+.imgUploadCard__remove {
+position: absolute;
+top: -6px;
+right: -6px;
+width: 22px;
+height: 22px;
+border-radius: 50%;
+border: 1px solid rgba(239, 68, 68, 0.30);
+background: rgba(239, 68, 68, 0.15);
+color: #fb7185;
+cursor: pointer;
+display: grid;
+place-items: center;
+transition: background 0.12s ease;
+}
+.imgUploadCard__remove:hover {
+background: rgba(239, 68, 68, 0.30);
+}
+/* ─── Address Preview ───────────────────────────────────────── */
+.addressPreview {
+display: flex;
+align-items: flex-start;
+gap: 8px;
+margin-top: 12px;
+padding: 10px 12px;
+border-radius: var(--r-sm);
+background: rgba(34, 197, 94, 0.06);
+border: 1px solid rgba(34, 197, 94, 0.14);
+font-size: 13px;
+color: rgba(255, 255, 255, 0.82);
+line-height: 1.4;
+}
+/* ─── Address Read-Only ─────────────────────────────────────── */
+.addressReadOnly {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--r-sm);
+  background: rgba(59, 130, 246, 0.06);
+  border: 1px solid rgba(59, 130, 246, 0.12);
+}
+.addressReadOnly__text {
+  flex: 1;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.5;
+}
+.addressReadOnly__text p {
+  margin: 0;
+}
+.addressReadOnly__empty {
+  flex: 1;
+  font-size: 13px;
+}
+/* ─── Coordinate Row ────────────────────────────────────────── */
+.coordRow {
+display: flex;
+gap: 10px;
+align-items: flex-end;
+margin-bottom: 12px;
+flex-wrap: wrap;
+}
+.coordRow__actions {
+display: flex;
+gap: 6px;
+padding-bottom: 1px;
+}
+.btn--sm {
+padding: 8px 12px;
+font-size: 12px;
+border-radius: 10px;
+}
+/* ─── Select (dropdown) Styles ──────────────────────────────── */
+select.input {
+cursor: pointer;
+appearance: none;
+background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.5)' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+background-repeat: no-repeat;
+background-position: right 12px center;
+padding-right: 32px;
+}
+select.input:disabled {
+opacity: 0.5;
+cursor: not-allowed;
+}
+/* ═══════════════════════════════════════════════════════════════
+ENHANCED STORE INFORMATION SECTION
+═══════════════════════════════════════════════════════════════ */
+/* ─── Info Grid (Read-only fields) ──────────────────────────── */
+.infoGrid {
+display: grid;
+gap: 12px;
+grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+margin-bottom: 16px;
+}
+.infoCard {
+position: relative;
+padding: 14px;
+border-radius: var(--r-sm);
+background: rgba(15, 23, 42, 0.35);
+border: 1px solid rgba(255, 255, 255, 0.10);
+transition: all 0.2s ease;
+}
+.infoCard--locked {
+background: rgba(15, 23, 42, 0.25);
+border: 1px dashed rgba(255, 255, 255, 0.08);
+}
+.infoCard__header {
+display: flex;
+align-items: flex-start;
+gap: 10px;
+margin-bottom: 10px;
+}
+.infoCard__icon {
+width: 32px;
+height: 32px;
+border-radius: 10px;
+display: grid;
+place-items: center;
+background: rgba(34, 197, 94, 0.12);
+border: 1px solid rgba(34, 197, 94, 0.18);
+color: var(--primary);
+flex-shrink: 0;
+}
+.infoCard__icon--locked {
+background: rgba(148, 163, 184, 0.10);
+border-color: rgba(148, 163, 184, 0.15);
+color: rgba(148, 163, 184, 0.65);
+}
+.infoCard__label {
+flex: 1;
+display: flex;
+flex-direction: column;
+gap: 4px;
+}
+.infoCard__title {
+font-size: 12px;
+font-weight: 600;
+color: rgba(255, 255, 255, 0.75);
+text-transform: uppercase;
+letter-spacing: 0.05em;
+}
+.infoCard__badge {
+display: inline-block;
+font-size: 9px;
+font-weight: 600;
+text-transform: uppercase;
+padding: 2px 6px;
+border-radius: 4px;
+background: rgba(34, 197, 94, 0.10);
+border: 1px solid rgba(34, 197, 94, 0.20);
+color: var(--primary);
+letter-spacing: 0.03em;
+width: fit-content;
+}
+.infoCard__badge--locked {
+background: rgba(148, 163, 184, 0.10);
+border-color: rgba(148, 163, 184, 0.18);
+color: rgba(148, 163, 184, 0.70);
+}
+.infoCard__value {
+font-size: 15px;
+font-weight: 700;
+color: rgba(255, 255, 255, 0.92);
+line-height: 1.4;
+margin-bottom: 6px;
+letter-spacing: -0.01em;
+}
+.infoCard__value--multiline {
+font-size: 13px;
+font-weight: 500;
+line-height: 1.5;
+}
+.infoCard--locked .infoCard__value {
+color: rgba(255, 255, 255, 0.65);
+}
+.infoCard__hint {
+font-size: 11px;
+color: var(--muted2);
+line-height: 1.4;
+}
+/* ─── Editable Section ──────────────────────────────────────── */
+.editableSection {
+margin-top: 16px;
+padding: 16px;
+border-radius: var(--r-sm);
+background: rgba(34, 197, 94, 0.04);
+border: 1px solid rgba(34, 197, 94, 0.12);
+}
+.editableSection__header {
+display: flex;
+align-items: center;
+gap: 8px;
+margin-bottom: 12px;
+font-size: 13px;
+font-weight: 600;
+color: var(--primary);
+letter-spacing: -0.01em;
+}
+.input--editable {
+background: rgba(2, 6, 23, 0.65);
+border-color: rgba(34, 197, 94, 0.20);
+}
+.input--editable:focus {
+border-color: rgba(34, 197, 94, 0.45);
+background: rgba(2, 6, 23, 0.85);
+box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.08);
+}
+/* ─── Description Box (Read-only) ───────────────────────────── */
+.descriptionBox {
+padding: 12px;
+border-radius: var(--r-sm);
+background: rgba(15, 23, 42, 0.25);
+border: 1px dashed rgba(255, 255, 255, 0.08);
+color: rgba(255, 255, 255, 0.70);
+font-size: 13px;
+line-height: 1.6;
+min-height: 60px;
+display: flex;
+align-items: center;
+}
+.descriptionBox p {
+margin: 0;
+}
 
-  /* Bottom-sheet modal feel on mobile */
-  .backdrop { align-items: flex-end; }
-  .modal {
-    border-radius: 18px 18px 0 0;
-    max-width: 100%;
-  }
-  .modal__body { max-height: 78vh; }
-  .qrBox__actions { grid-template-columns: 1fr; }
+/* ─── Location Status Card ─────────────────────────────────── */
+.locationStatus {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  border-radius: var(--r-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.25);
+}
+
+.locationStatus--active {
+  border-color: rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.05);
+}
+
+.locationStatus--empty {
+  border-color: rgba(251, 191, 36, 0.25);
+  background: rgba(251, 191, 36, 0.05);
+}
+
+.locationStatus__icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+.locationStatus__icon--muted {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+.locationStatus__content {
+  flex: 1;
+}
+
+.locationStatus__title {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.locationStatus__desc {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.5;
+}
+
+.locationStatus__debug {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.debugItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.debugLabel {
+  color: rgba(255, 255, 255, 0.6);
+  min-width: 120px;
+  font-weight: 500;
+}
+
+.debugValue {
+  color: rgba(255, 255, 255, 0.8);
+  font-family: ui-monospace, SFMono-Regular, 'Cascadia Code', monospace;
+}
+
+.debugValue--success {
+  color: rgb(34, 197, 94);
+  font-weight: 500;
+}
+
+.debugValue--warning {
+  color: rgb(251, 191, 36);
+  font-weight: 500;
+}
+
+/* ─── Location Preview Map ─────────────────────────────────── */
+.locationPreview {
+  width: 100%;
+  height: 200px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(15, 23, 42, 0.4);
+}
+
+.locationPreview :deep(.leaflet-popup-content-wrapper) {
+  background: rgba(15, 23, 42, 0.95);
+  color: rgba(255, 255, 255, 0.9);
+  border-radius: 6px;
+  backdrop-filter: blur(10px);
+}
+
+.locationPreview :deep(.leaflet-popup-tip) {
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.locationPreview :deep(.leaflet-tooltip) {
+  background: rgba(15, 23, 42, 0.95);
+  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  backdrop-filter: blur(10px);
+}
+
+.shop-marker {
+  border: none !important;
+  background: transparent !important;
+}
+
+/* ─── Responsive Adjustments ────────────────────────────────── */
+@media (max-width: 720px) {
+.infoGrid {
+grid-template-columns: 1fr;
+}
+.editableSection {
+padding: 12px;
+}
+
+.locationStatus {
+  flex-direction: column;
+  gap: 12px;
+}
+
+.locationStatus__icon {
+  align-self: flex-start;
+}
+
+.locationPreview {
+  height: 150px;
+}
+
+.debugItem {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.debugLabel {
+  min-width: unset;
+  font-size: 12px;
+}
 }
 </style>

@@ -8,6 +8,7 @@ import ChatView from "../pages/ChatView.vue";
 
 // Lazy imports
 const Home = () => import("../pages/Home.vue");
+const NotFound = () => import("../pages/NotFound.vue");
 const Cart = () => import("../pages/Cart.vue");
 const Search = () => import("../pages/Search.vue");
 const ProductSearchResult = () => import("../pages/ProductSearchResult.vue");
@@ -284,6 +285,20 @@ const routes = [
         component: AdminSettings 
       },
     ],
+  },
+
+  // 404 Not Found Routes
+  {
+    path: "/not-found",
+    name: "NotFound",
+    component: NotFound,
+    meta: { public: true },
+  },
+  {
+    path: "/:pathMatch(.*)*",
+    name: "CatchAll",
+    component: NotFound,
+    meta: { public: true },
   },
 ];
 

@@ -5,10 +5,12 @@ import { formatToPHCurrency } from "../utils/currencyFormat";
 import { useCartStore } from "../stores/cartStores";
 import { useUserStore } from "../stores/userStores";
 import { useOrderStore } from "../stores/OrderStores";
+import { useAuthStore } from "../stores/authStores";
 import { Toast } from "../components/composable/Toast.js";
 import { createQRPHPayment } from "../utils/paymentApi";
 import QRCodePaymentModal from "./QRCodePaymentModal.vue";
 import { useCheckoutAddressOverride } from "../composables/useCheckoutAddressOverride";
+import { useShippingStore } from "../stores/shippingStore";
 
 import {
   UserIcon,
@@ -52,6 +54,8 @@ type Address = {
 const cartStore = useCartStore();
 const userStore = useUserStore();
 const orderStore = useOrderStore();
+const shippingStore = useShippingStore();
+const authStore = useAuthStore();
 
 const props = defineProps({
   show: Boolean,
@@ -138,19 +142,46 @@ const isValidPHPhone = (value: string) => /^(09\d{9}|\+639\d{9})$/.test(value);
 
 const phoneError = computed(() => {
   const val = (phoneNumber.value || "").trim();
-  if (!val) return "Phone number is required.";
-  return isValidPHPhone(val) ? "" : "Invalid PH phone number.";
+  if (!val) return ""; // Don't show error for empty phone - just block submission
+  return isValidPHPhone(val) ? "" : "Invalid PH phone number format (09XXXXXXXXX).";
 });
 
-const canConfirm = computed(
-  () =>
-    Boolean((customerName.value || "").trim()) &&
-    isAddressValid.value &&
-    Boolean(selectedPaymentMethod.value) &&
-    Boolean(selectedDelivery.value) &&
-    !phoneError.value &&
-    !isSubmitting.value
-);
+const walletBalance = computed(() => {
+  return authStore.user?.wallet || 0;
+});
+
+const canConfirm = computed(() => {
+  const hasName = Boolean((customerName.value || "").trim());
+  const hasValidAddress = isAddressValid.value; 
+  const hasPayment = Boolean(selectedPaymentMethod.value);
+  const hasDelivery = Boolean(selectedDelivery.value);
+  const hasValidPhone = Boolean((phoneNumber.value || "").trim()) && !phoneError.value;
+  const notSubmitting = !isSubmitting.value;
+  
+  // Check wallet balance if using wallet payment
+  const hasSufficientWallet = selectedPaymentMethod.value !== 'wallet' || 
+    (walletBalance.value >= totalAmount.value);
+
+  // Debug logging to help identify issues
+  const result = hasName && hasValidAddress && hasPayment && hasDelivery && hasValidPhone && hasSufficientWallet && notSubmitting;
+  console.log('🔍 Button Status:', {
+    hasName,
+    hasValidAddress,
+    hasPayment,
+    hasDelivery, 
+    hasValidPhone,
+    hasSufficientWallet,
+    walletBalance: walletBalance.value,
+    totalAmount: totalAmount.value,
+    paymentMethod: selectedPaymentMethod.value,
+    phoneValue: phoneNumber.value,
+    phoneError: phoneError.value,
+    notSubmitting,
+    result
+  });
+
+  return result;
+});
 
 const getUserData = () => {
   const raw = localStorage.getItem("userInfo");
@@ -219,13 +250,72 @@ watch(
   { immediate: true }
 );
 
-watch([selectedDelivery, hasFreeShipping], ([delivery, freeShipping]) => {
-  if (freeShipping) shippingFee.value = 0;
-  else if (delivery === "jnt") shippingFee.value = 60;
-  else if (delivery === "pickup") shippingFee.value = 0;
-  else if (delivery === "agreement") shippingFee.value = null;
-  else shippingFee.value = 0;
+// Watch for delivery method changes and calculate shipping
+watch([selectedDelivery, hasFreeShipping, () => address.city, () => address.province], async ([delivery, freeShipping, city, province]) => {
+  if (freeShipping) {
+    shippingFee.value = 0;
+    shippingStore.clearQuote();
+    return;
+  }
+  
+  if (delivery === "pickup") {
+    shippingFee.value = 0;
+    shippingStore.clearQuote();
+  } else if (delivery === "agreement") {
+    shippingFee.value = null;
+    shippingStore.clearQuote();
+  } else if (delivery === "jnt") {
+    // Only calculate J&T shipping if we have address filled in
+    if (city && province) {
+      await calculateJNTShipping();
+    } else {
+      // No address yet — clear any stale quote but don't assume a fee
+      shippingFee.value = null;
+      shippingStore.clearQuote();
+    }
+  } else {
+    shippingFee.value = 0;
+    shippingStore.clearQuote();
+  }
 });
+
+// Function to calculate J&T shipping quote
+const calculateJNTShipping = async () => {
+  try {
+    const items = props.selectedItems && props.selectedItems.length > 0 
+      ? props.selectedItems 
+      : cartStore.selectedItemData;
+
+    if (!items || items.length === 0) {
+      shippingFee.value = null;
+      shippingStore.clearQuote();
+      return;
+    }
+
+    const response = await shippingStore.quoteJnt(
+      { province: address.province, city: address.city },
+      items.map(item => ({
+        productId: item.productId || '',
+        quantity: Number(item.quantity) || 1
+      }))
+    );
+    
+    if (response?.success && shippingStore.hasValidQuote) {
+      shippingFee.value = shippingStore.totalShippingFee;
+    } else {
+      // Quote failed — surface the error and block checkout (no ₱60 fallback)
+      shippingFee.value = null;
+      if (response?.issue) {
+        console.warn('Shipping quote issue:', response.issue, response.error);
+        Toast(shippingStore.getErrorMessage(response.issue), 'warning', 'var(--secondary-color)', 3000);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to calculate shipping:', error);
+    shippingFee.value = null;
+    shippingStore.clearQuote();
+  }
+};
 
 const saveCheckoutStateNow = () => {
   const state = {
@@ -426,7 +516,10 @@ const calculateItemsSubtotal = (items: SelectedItem[]) =>
 const getShippingFeeForOrder = () => (typeof shippingFee.value === "number" ? shippingFee.value : 0);
 
 const buildOrderData = (vendorId: string, items: SelectedItem[]) => {
-  const fee = getShippingFeeForOrder();
+  const isJnt = selectedDelivery.value === "jnt";
+  // For J&T the backend recomputes the fee server-side; pass 0 so we don't
+  // risk sending a stale or mismatched amount.
+  const fee = isJnt ? 0 : getShippingFeeForOrder();
   const itemsSubtotal = calculateItemsSubtotal(items);
   const subTotal = itemsSubtotal + fee;
 
@@ -434,7 +527,7 @@ const buildOrderData = (vendorId: string, items: SelectedItem[]) => {
     shippingFee: fee,
     shippingAddress: { ...address },
     paymentMethod: selectedPaymentMethod.value,
-    shippingOption: selectedDelivery.value,
+    shippingOption: isJnt ? "J&T" : getShippingOptionLabel(selectedDelivery.value),
     agreementDetails: selectedDelivery.value === "agreement" ? customerAgreement.value : "",
     phone: phoneNumber.value,
     name: customerName.value,
@@ -488,6 +581,17 @@ const finalizeCheckoutAlways = async () => {
 
 async function submitOrder() {
   if (!canConfirm.value) return;
+
+  // Hard guard: J&T must have a valid server-side quote before we proceed
+  if (selectedDelivery.value === "jnt" && !shippingStore.hasValidQuote) {
+    Toast(
+      shippingStore.getErrorMessage(shippingStore.quoteError),
+      "error",
+      "var(--secondary-color)",
+      3000
+    );
+    return;
+  }
 
   if (isQrphSelected()) {
     await initiateQRPHPayment();
@@ -614,205 +718,223 @@ onMounted(async () => {
   <transition name="fade">
     <div v-if="show" class="modal-overlay">
       <div class="modal-container">
+        <!-- Header -->
         <div class="modal-header">
           <h2 class="modal-title">Checkout</h2>
+          <button class="close-btn" @click="handleClose" aria-label="Close">✕</button>
         </div>
 
         <div class="modal-body">
+          <!-- 1. Shipping Address -->
           <section class="card">
-            <div class="address-header">
+            <div class="card-header">
               <h3 class="section-title">
                 <UserIcon class="section-icon" />
-                Shipping Address
+                Delivery Details
               </h3>
-              <button v-if="hasAddress" @click="saveCustomerInfo" class="edit-btn" :disabled="isSubmitting">
+              <button v-if="isAddressValid" @click="saveCustomerInfo" class="edit-btn" :disabled="isSubmitting">
                 {{ isEditing ? "Save" : "Edit" }}
               </button>
             </div>
 
-            <div v-if="isEditing || !hasAddress" class="address-form">
-              <div class="input-group">
-                <input
-                  type="text"
-                  v-model="customerName"
-                  id="name"
-                  @focus="focused.name = true"
-                  @blur="focused.name = !!customerName"
-                  placeholder=" "
-                />
-                <label :for="'name'" :class="{ floated: focused.name || customerName }">Full Name</label>
+            <div v-if="isEditing || !isAddressValid" class="form-grid">
+              <div class="input-group full-width">
+                <input v-model="customerName" id="name" type="text"
+                  @focus="focused.name = true" @blur="focused.name = !!customerName" placeholder=" " />
+                <label for="name" :class="{ floated: focused.name || customerName }">Full Name</label>
               </div>
 
-              <div class="input-group">
-                <input
-                  type="text"
-                  v-model="phoneNumber"
-                  id="phone"
-                  @focus="focused.phone = true"
-                  @blur="focused.phone = !!phoneNumber"
-                  placeholder=" "
-                />
-                <label :for="'phone'" :class="{ floated: focused.phone || phoneNumber }">Contact Number</label>
+              <div class="input-group full-width">
+                <input v-model="phoneNumber" id="phone" type="tel"
+                  @focus="focused.phone = true" @blur="focused.phone = !!phoneNumber" placeholder=" " />
+                <label for="phone" :class="{ floated: focused.phone || phoneNumber }">Contact Number</label>
+                <p v-if="phoneError && phoneNumber" class="field-error">{{ phoneError }}</p>
               </div>
-              <p v-if="phoneError" class="error">{{ phoneError }}</p>
 
               <div class="input-group" v-for="(value, key) in address" :key="key">
-                <input
-                  v-model="address[key as keyof typeof address]"
-                  :id="key"
-                  type="text"
-                  @focus="focused[key] = true"
-                  @blur="focused[key] = !!address[key as keyof typeof address]"
-                  placeholder=" "
-                />
+                <input v-model="address[key as keyof typeof address]" :id="key" type="text"
+                  @focus="focused[key] = true" @blur="focused[key] = !!address[key as keyof typeof address]" placeholder=" " />
                 <label :for="key" :class="{ floated: focused[key] || address[key as keyof typeof address] }">
-                  {{ key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, " $1") }}
+                  {{ key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1') }}
                 </label>
               </div>
-
-              <p v-if="!isAddressValid" class="error">Please complete all address fields.</p>
             </div>
 
-            <div v-else class="address-display">
-              <p class="customer-name"><strong>{{ customerName }}</strong></p>
-              <p class="customer-phone">{{ phoneNumber }}</p>
-              <p class="customer-address">
-                {{ address.street }}, {{ address.barangay }}, {{ address.city }}, {{ address.province }},
-                {{ address.zipCode }}
-              </p>
+            <div v-else class="address-summary">
+              <p class="addr-name">{{ customerName }}</p>
+              <p class="addr-phone">{{ phoneNumber }}</p>
+              <p class="addr-line">{{ address.street }}, {{ address.barangay }}, {{ address.city }}, {{ address.province }} {{ address.zipCode }}</p>
             </div>
           </section>
 
+          <!-- 2. Items -->
           <section class="card">
             <h3 class="section-title">
               <CubeIcon class="section-icon" />
-              Order Summary
+              Your Items
             </h3>
             <div class="items-list">
-              <div v-for="(item, i) in props.selectedItems" :key="i" class="item">
-                <img :src="item.imgUrl" alt="Product" @error="handleImageError" class="item-img" />
-                <div class="item-details">
-                  <p class="item-label">{{ item.name }}</p>
-                  <p class="item-meta">{{ item.label }}</p>
-                  <p class="item-meta">Qty: {{ item.quantity }}</p>
+              <div v-for="(item, i) in props.selectedItems" :key="i" class="item-row">
+                <img :src="item.imgUrl" alt="" @error="handleImageError" class="item-img" />
+                <div class="item-info">
+                  <p class="item-name">{{ item.name }}</p>
+                  <p v-if="item.label" class="item-variant">{{ item.label }}</p>
+                  <p class="item-qty">Qty: {{ item.quantity }}</p>
                 </div>
                 <p class="item-price">{{ formatToPHCurrency(Number(item.price) * Number(item.quantity)) }}</p>
               </div>
             </div>
-            <hr class="divider" />
-            <div class="totals">
-              <div class="subtotal">
-                <span>Subtotal:</span>
-                <strong>{{ formatToPHCurrency(subtotal) }}</strong>
-              </div>
-              <div class="subtotal">
-                <span>Shipping:</span>
-                <strong v-if="hasFreeShipping" class="free-shipping-label">
-                  <TruckIcon class="free-ship-icon" /> FREE
-                </strong>
-                <strong v-else-if="shippingFee === null">TBD</strong>
-                <strong v-else>{{ formatToPHCurrency(shippingFee as number) }}</strong>
-              </div>
-              <div class="subtotal total">
-                <span>Total:</span>
-                <strong>{{ formatToPHCurrency(totalAmount) }}</strong>
-              </div>
-            </div>
           </section>
 
+          <!-- 3. Delivery Option -->
           <section class="card">
             <h3 class="section-title">
               <TruckIcon class="section-icon" />
-              Delivery Options
+              Delivery Method
             </h3>
-            <div class="radio-group">
-              <label class="radio-tile" :class="{ selected: selectedDelivery === 'pickup' }">
+            <div class="option-group">
+              <label class="option-tile" :class="{ active: selectedDelivery === 'pickup' }">
                 <input type="radio" value="pickup" v-model="selectedDelivery" :disabled="isSubmitting" />
-                <div class="delivery-option">
-                  <span class="option-label">
-                    <BuildingStorefrontIcon class="option-icon" />
-                    Pick Up
-                  </span>
-                  <small>Free - Pick up from seller</small>
+                <BuildingStorefrontIcon class="opt-icon" />
+                <div class="opt-text">
+                  <span class="opt-label">Pick Up</span>
+                  <span class="opt-desc">Free — Collect from the seller</span>
                 </div>
+                <span class="opt-price free">Free</span>
               </label>
-              <label class="radio-tile" :class="{ selected: selectedDelivery === 'agreement' }">
-                <input type="radio" value="agreement" v-model="selectedDelivery" :disabled="isSubmitting" />
-                <div class="agreement-option">
-                  <span class="option-label">
-                    <UserIcon class="option-icon" />
-                    Connect with Seller
+
+              <label class="option-tile" :class="{ active: selectedDelivery === 'jnt' }">
+                <input type="radio" value="jnt" v-model="selectedDelivery" :disabled="isSubmitting" />
+                <TruckIcon class="opt-icon" />
+                <div class="opt-text">
+                  <span class="opt-label">J&T Express</span>
+                  <span v-if="shippingStore.isLoadingQuote" class="opt-desc loading">Calculating...</span>
+                  <span v-else-if="selectedDelivery === 'jnt' && shippingStore.quoteError" class="opt-desc error-text">
+                    {{ shippingStore.getErrorMessage(shippingStore.quoteError) }}
                   </span>
-                  <small>Discuss delivery with seller</small>
+                  <span v-else class="opt-desc">Door-to-door delivery</span>
+                </div>
+                <span v-if="selectedDelivery === 'jnt' && shippingStore.hasValidQuote" class="opt-price">
+                  {{ formatToPHCurrency(shippingStore.totalShippingFee) }}
+                </span>
+              </label>
+
+              <label class="option-tile" :class="{ active: selectedDelivery === 'agreement' }">
+                <input type="radio" value="agreement" v-model="selectedDelivery" :disabled="isSubmitting" />
+                <UserIcon class="opt-icon" />
+                <div class="opt-text">
+                  <span class="opt-label">Seller Arrangement</span>
+                  <span class="opt-desc">Discuss delivery with the seller</span>
                 </div>
               </label>
             </div>
-            <transition name="fade">
-              <div v-if="selectedDelivery === 'agreement'" class="agreement-details">
-                <h4 class="agreement-title">Agreement Details</h4>
-                <div class="input-group">
-                  <textarea
-                    v-model="customerAgreement"
-                    id="customerAgreement"
-                    placeholder="e.g., I prefer Lalamove, please message me for details..."
-                    class="agreement-textarea"
-                  ></textarea>
-                </div>
+
+            <transition name="slide">
+              <div v-if="selectedDelivery === 'agreement'" class="agreement-box">
+                <textarea v-model="customerAgreement" placeholder="e.g., I prefer Lalamove, please message me for details..." class="agreement-input" />
               </div>
             </transition>
-            <p v-if="!selectedDelivery" class="error">Please select a delivery option.</p>
+
+            <!-- J&T discount note (only if there's a discount) -->
+            <div v-if="selectedDelivery === 'jnt' && shippingStore.hasValidQuote && shippingStore.totalShippingDiscount > 0" class="discount-note">
+              <span class="discount-badge">Discount Applied</span>
+              <span>You save {{ formatToPHCurrency(shippingStore.totalShippingDiscount) }} on shipping!</span>
+            </div>
           </section>
 
+          <!-- 4. Payment -->
           <section class="card">
             <h3 class="section-title">
               <CreditCardIcon class="section-icon" />
-              Payment Methods
+              Payment
             </h3>
-            <div class="radio-group">
-              <label class="radio-tile" :class="{ selected: selectedPaymentMethod === 'wallet' }">
-                <input type="radio" value="wallet" v-model="selectedPaymentMethod" :disabled="isSubmitting" />
-                <div class="payment-option">
-                  <span class="option-label">
-                    <WalletIcon class="option-icon" />
-                    Wallet
-                  </span>
-                </div>
-              </label>
-
-              <label class="radio-tile" :class="{ selected: selectedPaymentMethod === 'qrph' }">
-                <input type="radio" value="qrph" v-model="selectedPaymentMethod" :disabled="isSubmitting" />
-                <div class="payment-option">
-                  <span class="option-label">
-                    <QrCodeIcon class="option-icon" />
-                    QRPH
-                  </span>
-                  <small>Scan to pay via bank/e-wallet</small>
-                </div>
-              </label>
-
-              <label class="radio-tile" :class="{ selected: selectedPaymentMethod === 'cod' }">
+            <div class="option-group">
+              <label class="option-tile" :class="{ active: selectedPaymentMethod === 'cod' }">
                 <input type="radio" value="cod" v-model="selectedPaymentMethod" :disabled="isSubmitting" />
-                <div class="payment-option">
-                  <span class="option-label">
-                    <BanknotesIcon class="option-icon" />
-                    Cash on Delivery
+                <BanknotesIcon class="opt-icon" />
+                <div class="opt-text">
+                  <span class="opt-label">Cash on Delivery</span>
+                  <span class="opt-desc">Pay when you receive</span>
+                </div>
+              </label>
+
+              <label class="option-tile" :class="{ 
+                active: selectedPaymentMethod === 'wallet', 
+                'insufficient': selectedPaymentMethod === 'wallet' && walletBalance < totalAmount 
+              }">
+                <input type="radio" value="wallet" v-model="selectedPaymentMethod" :disabled="isSubmitting" />
+                <WalletIcon class="opt-icon" />
+                <div class="opt-text">
+                  <span class="opt-label">Wallet</span>
+                  <span class="opt-desc">Balance: {{ formatToPHCurrency(walletBalance) }}</span>
+                  <span v-if="selectedPaymentMethod === 'wallet' && walletBalance < totalAmount" class="opt-error">
+                    Insufficient balance (need {{ formatToPHCurrency(totalAmount - walletBalance) }} more)
                   </span>
+                </div>
+              </label>
+
+              <label class="option-tile" :class="{ active: selectedPaymentMethod === 'qrph' }">
+                <input type="radio" value="qrph" v-model="selectedPaymentMethod" :disabled="isSubmitting" />
+                <QrCodeIcon class="opt-icon" />
+                <div class="opt-text">
+                  <span class="opt-label">QRPH</span>
+                  <span class="opt-desc">Scan to pay via bank or e-wallet</span>
                 </div>
               </label>
             </div>
-            <p v-if="!selectedPaymentMethod" class="error">Please select a payment method.</p>
+          </section>
+
+          <!-- 5. Order Total (sticky-feeling summary) -->
+          <section class="card summary-card">
+            <h3 class="section-title">Order Summary</h3>
+            <div class="summary-rows">
+              <div class="sum-row">
+                <span>Subtotal ({{ props.selectedItems?.length || 0 }} {{ (props.selectedItems?.length || 0) === 1 ? 'item' : 'items' }})</span>
+                <span>{{ formatToPHCurrency(subtotal) }}</span>
+              </div>
+              <div class="sum-row">
+                <span>Shipping</span>
+                <span v-if="hasFreeShipping" class="free-tag">FREE</span>
+                <span v-else-if="shippingFee === null" class="tbd">To be determined</span>
+                <span v-else>{{ formatToPHCurrency(shippingFee as number) }}</span>
+              </div>
+              <div v-if="shippingStore.totalShippingDiscount > 0 && selectedDelivery === 'jnt'" class="sum-row discount-row">
+                <span>Shipping Discount</span>
+                <span>-{{ formatToPHCurrency(shippingStore.totalShippingDiscount) }}</span>
+              </div>
+            </div>
+            <div class="sum-total">
+              <span>Total</span>
+              <span class="total-amount">{{ formatToPHCurrency(totalAmount) }}</span>
+            </div>
           </section>
 
           <div class="bottom-spacer"></div>
         </div>
 
+        <!-- Footer -->
         <div class="modal-footer">
-          <button class="btn cancel" @click="handleClose" :disabled="isSubmitting">Cancel</button>
-          <button class="btn confirm" :disabled="!canConfirm" @click="submitOrder">
-            <span v-if="isSubmitting">Processing...</span>
-            <span v-else-if="selectedPaymentMethod === 'qrph'">Pay with QRPH</span>
-            <span v-else>Place Order</span>
-          </button>
+          <div class="button-actions">
+            <button class="btn-cancel" @click="handleClose" :disabled="isSubmitting">Cancel</button>
+            <button class="btn-place-order" :disabled="!canConfirm" @click="submitOrder">
+              <span v-if="isSubmitting" class="btn-loading">
+                <span class="spinner"></span> Processing...
+              </span>
+              <span v-else-if="selectedPaymentMethod === 'qrph'">Pay {{ formatToPHCurrency(totalAmount) }}</span>
+              <span v-else>Place Order · {{ formatToPHCurrency(totalAmount) }}</span>
+            </button>
+          </div>
+          
+          <!-- Debug info for disabled button - appears under button actions -->
+          <div v-if="!canConfirm && !isSubmitting" class="debug-info">
+            <span class="debug-label">Missing:</span>
+            <span v-if="!(customerName || '').trim()" class="debug-item">Name</span>
+            <span v-if="!isAddressValid" class="debug-item">Complete Address</span>
+            <span v-if="!(phoneNumber || '').trim()" class="debug-item">Phone</span>
+            <span v-if="!selectedPaymentMethod" class="debug-item">Payment Method</span>
+            <span v-if="selectedPaymentMethod === 'wallet' && walletBalance < totalAmount" class="debug-item">Insufficient Wallet Balance</span>
+            <span v-if="!selectedDelivery" class="debug-item">Delivery Option</span>
+          </div>
         </div>
       </div>
     </div>
@@ -834,335 +956,111 @@ onMounted(async () => {
 
 
 <style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: all 0.3s ease-out;
-}
+/* ─── Transitions ─────────────────────────────────────────────────────────── */
+.fade-enter-active, .fade-leave-active { transition: all 0.25s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(12px); }
+.slide-enter-active, .slide-leave-active { transition: all 0.2s ease; }
+.slide-enter-from, .slide-leave-to { opacity: 0; max-height: 0; overflow: hidden; }
+.slide-enter-to { max-height: 200px; }
 
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-  transform: translateY(20px) scale(0.98);
-}
-
-/* Modal Overlay - Fullscreen on Mobile */
+/* ─── Overlay ─────────────────────────────────────────────────────────────── */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 900000;
-  padding: 0;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(4px);
 }
 
-/* Modal Container - Fullscreen on Mobile */
+/* ─── Container ───────────────────────────────────────────────────────────── */
 .modal-container {
-  background: var(--bg-primary);
+  background: var(--bg-primary, #fff);
   width: 100%;
   height: 100dvh;
-  box-shadow: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: none;
 }
 
-/* Header - Sticky on mobile */
+/* ─── Header ──────────────────────────────────────────────────────────────── */
 .modal-header {
-  padding: 1rem 1.25rem;
+  padding: 0.875rem 1.25rem;
   border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-shrink: 0;
-  background: var(--surface);
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  background: var(--surface, #fff);
 }
 
 .modal-title {
-  font-size: 1.25rem;
+  font-size: 1.125rem;
   font-weight: 700;
   color: var(--text-primary);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
 }
 
-.close-button {
-  width: 32px;
-  height: 32px;
+.close-btn {
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: none;
+  border: none;
   color: var(--text-secondary);
-  background: var(--surface-hover);
-  border: 1px solid var(--border-color);
-  border-radius: 50%;
+  font-size: 1rem;
   cursor: pointer;
-  font-size: 1.5rem;
-  line-height: 1;
-  transition: all 0.2s;
+  border-radius: 50%;
+  transition: 0.2s;
 }
+.close-btn:hover { background: var(--hover-bg, #f3f4f6); }
 
-.close-button:hover {
-  color: var(--text-primary);
-  background: var(--bg-secondary);
-  border-color: var(--primary-color);
-  transform: rotate(90deg);
-}
-
-/* Body - Single column with proper spacing */
+/* ─── Body ────────────────────────────────────────────────────────────────── */
 .modal-body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 1rem 1rem 0;
+  padding: 0.75rem 1rem 0;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  background: var(--bg-primary);
+  gap: 0.75rem;
 }
 
-/* Cards - Modern spacing */
+/* ─── Cards ───────────────────────────────────────────────────────────────── */
 .card {
-  background: var(--surface);
+  background: var(--surface, #fff);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
-  padding: 1.25rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  transition: all 0.3s ease;
+  border-radius: 14px;
+  padding: 1rem 1.125rem;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
 }
 
 .section-title {
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 1rem;
-  letter-spacing: -0.01em;
+  margin-bottom: 0.75rem;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
+.card-header .section-title { margin-bottom: 0; }
 
-/* Section and Option Icons */
 .section-icon {
-  width: 20px;
-  height: 20px;
-  color: var(--primary-color);
-  flex-shrink: 0;
-}
-
-.option-icon {
   width: 18px;
   height: 18px;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-.radio-tile.selected .option-icon {
-  color: var(--primary-color);
-}
-
-.free-ship-icon {
-  width: 14px;
-  height: 14px;
-}
-
-.divider {
-  border: none;
-  border-top: 1px solid var(--border-color);
-  margin: 1rem 0;
-}
-
-/* Order Summary */
-.items-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.875rem;
-  max-height: 300px;
-  overflow-y: auto;
-  padding-right: 0.25rem;
-}
-
-.item {
-  display: flex;
-  gap: 0.875rem;
-  align-items: flex-start;
-}
-
-.item-img {
-  width: 56px;
-  height: 56px;
-  object-fit: cover;
-  border-radius: 10px;
-  border: 1px solid var(--border-color);
-  flex-shrink: 0;
-}
-
-.item-details {
-  flex: 1;
-  min-width: 0;
-}
-
-.item-label {
-  font-weight: 600;
-  color: var(--text-primary);
-  font-size: 0.875rem;
-  line-height: 1.3;
-  margin-bottom: 0.125rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
-.item-meta {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  line-height: 1.4;
-}
-
-.item-price {
-  font-size: 0.875rem;
-  font-weight: 600;
   color: var(--primary-color);
   flex-shrink: 0;
-}
-
-.totals {
-  display: flex;
-  flex-direction: column;
-  gap: 0.625rem;
-  font-size: 0.875rem;
-}
-
-.subtotal {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  color: var(--text-secondary);
-}
-
-.subtotal strong {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.free-shipping-label {
-  background: linear-gradient(135deg, #10b981, #059669);
-  color: white !important;
-  padding: 0.25rem 0.75rem;
-  border-radius: 20px;
-  font-weight: 600 !important;
-  font-size: 0.7rem;
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.total {
-  font-size: 1rem;
-  font-weight: 700;
-  padding-top: 0.625rem;
-  border-top: 2px solid var(--border-color);
-  margin-top: 0.25rem;
-}
-
-.total strong {
-  color: var(--primary-color);
-  font-size: 1.125rem;
-}
-
-/* Radio Tiles */
-.radio-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.radio-tile {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  padding: 1rem;
-  border: 2px solid var(--border-color);
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  background: var(--surface);
-}
-
-.radio-tile:active {
-  transform: scale(0.98);
-}
-
-.radio-tile.selected {
-  border-color: var(--primary-color);
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(16, 185, 129, 0.04) 100%);
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-}
-
-.radio-tile input {
-  accent-color: var(--primary-color);
-  height: 1.125rem;
-  width: 1.125rem;
-  margin-top: 0.125rem;
-  flex-shrink: 0;
-}
-
-.delivery-option,
-.agreement-option,
-.payment-option {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  flex: 1;
-}
-
-.option-label {
-  font-weight: 600;
-  font-size: 0.9375rem;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.agreement-option small,
-.delivery-option small,
-.payment-option small {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  font-weight: 400;
-  line-height: 1.3;
-}
-
-.agreement-details {
-  margin-top: 0.875rem;
-  padding-top: 0.875rem;
-  border-top: 1px solid var(--border-color);
-}
-
-.agreement-title {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 0.625rem;
-}
-
-/* Customer Info */
-.address-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
 }
 
 .edit-btn {
@@ -1172,59 +1070,53 @@ onMounted(async () => {
   border: none;
   color: var(--primary-color);
   cursor: pointer;
-  transition: color 0.2s;
-  padding: 0.375rem 0.75rem;
-  border-radius: 8px;
+  padding: 0.25rem 0.625rem;
+  border-radius: 6px;
+  transition: 0.15s;
 }
+.edit-btn:hover { background: rgba(27, 171, 80, 0.08); }
 
-.edit-btn:hover {
-  background: rgba(16, 185, 129, 0.1);
-}
-
-.address-form {
+/* ─── Form ────────────────────────────────────────────────────────────────── */
+.form-grid {
   display: flex;
   flex-direction: column;
-  gap: 0.875rem;
+  gap: 0.75rem;
 }
 
 .input-group {
   position: relative;
 }
 
-.input-group input,
-.agreement-textarea {
+.input-group input {
   width: 100%;
-  padding: 0.875rem 1rem;
-  border: 2px solid var(--border-color);
-  border-radius: 12px;
-  background: var(--surface);
-  font-size: 0.9375rem;
+  padding: 0.75rem 0.875rem;
+  border: 1.5px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  font-size: 0.875rem;
   color: var(--text-primary);
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
-
-.input-group input:focus,
-.agreement-textarea:focus {
+.input-group input:focus {
   outline: none;
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1);
+  box-shadow: 0 0 0 3px rgba(27, 171, 80, 0.1);
 }
 
 .input-group label {
   position: absolute;
-  left: 1rem;
+  left: 0.875rem;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 0.875rem;
-  background: var(--surface);
-  padding: 0 0.375rem;
+  font-size: 0.8125rem;
+  background: var(--surface, #fff);
+  padding: 0 0.25rem;
   color: var(--text-secondary);
   pointer-events: none;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: 0.2s ease;
 }
-
-.input-group input:not(:placeholder-shown)+label,
-.input-group input:focus+label,
+.input-group input:not(:placeholder-shown) + label,
+.input-group input:focus + label,
 .input-group label.floated {
   top: 0;
   transform: translateY(-50%) scale(0.85);
@@ -1232,182 +1124,387 @@ onMounted(async () => {
   font-weight: 600;
 }
 
-.agreement-textarea {
-  min-height: 90px;
-  resize: vertical;
-  font-family: inherit;
+.field-error {
+  font-size: 0.7rem;
+  color: var(--error-color, #e11d48);
+  margin-top: 0.25rem;
 }
 
-.address-display {
-  font-size: 0.875rem;
+/* ─── Address Summary ─────────────────────────────────────────────────────── */
+.address-summary {
+  font-size: 0.8125rem;
   color: var(--text-secondary);
-  line-height: 1.6;
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
+  line-height: 1.5;
 }
-
-.customer-name {
-  font-size: 0.9375rem;
+.addr-name {
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-primary);
+  margin-bottom: 0.125rem;
+}
+.addr-phone { margin-bottom: 0.125rem; }
+
+/* ─── Items ───────────────────────────────────────────────────────────────── */
+.items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
-.customer-phone {
-  color: var(--text-secondary);
+.item-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
 }
 
-.customer-address {
-  color: var(--text-secondary);
-}
-
-/* Bottom spacer to prevent content hiding under fixed footer */
-.bottom-spacer {
-  height: 140px;
+.item-img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
-/* Fixed Footer with Actions */
+.item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.item-variant,
+.item-qty {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.item-price {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  flex-shrink: 0;
+}
+
+/* ─── Option Tiles (delivery + payment) ───────────────────────────────────── */
+.option-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.option-tile {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.75rem 0.875rem;
+  border: 1.5px solid var(--border-color);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: 0.2s;
+  background: var(--surface, #fff);
+}
+.option-tile:active { transform: scale(0.99); }
+.option-tile.active {
+  border-color: var(--primary-color);
+  background: rgba(27, 171, 80, 0.04);
+}
+
+.option-tile input[type="radio"] {
+  display: none;
+}
+
+.opt-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.option-tile.active .opt-icon { color: var(--primary-color); }
+
+.opt-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.opt-label {
+  font-weight: 600;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+}
+
+.opt-desc {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  line-height: 1.3;
+}
+.opt-desc.loading { color: var(--secondary-color); }
+.opt-desc.error-text { color: var(--error-color, #e11d48); }
+
+.opt-error {
+  font-size: 0.65rem;
+  color: var(--error-color, #e11d48);
+  font-weight: 500;
+  margin-top: 0.125rem;
+}
+
+.option-tile.insufficient {
+  border-color: var(--error-color, #e11d48);
+  background: rgba(225, 29, 72, 0.04);
+}
+
+.option-tile.insufficient .opt-icon {
+  color: var(--error-color, #e11d48);
+}
+
+.opt-price {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.opt-price.free {
+  color: var(--primary-color);
+  font-size: 0.75rem;
+  background: rgba(27, 171, 80, 0.1);
+  padding: 0.125rem 0.5rem;
+  border-radius: 20px;
+}
+
+/* ─── Agreement ───────────────────────────────────────────────────────────── */
+.agreement-box {
+  margin-top: 0.625rem;
+  padding-top: 0.625rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.agreement-input {
+  width: 100%;
+  min-height: 70px;
+  padding: 0.625rem 0.875rem;
+  border: 1.5px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  resize: vertical;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+.agreement-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+/* ─── Discount Note ───────────────────────────────────────────────────────── */
+.discount-note {
+  margin-top: 0.625rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(27, 171, 80, 0.06);
+  border-radius: 8px;
+  font-size: 0.75rem;
+  color: var(--primary-color);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.discount-badge {
+  background: var(--primary-color);
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 700;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+/* ─── Order Summary Card ──────────────────────────────────────────────────── */
+.summary-card {
+  background: var(--surface, #fff);
+}
+
+.summary-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding-bottom: 0.625rem;
+  border-bottom: 1.5px solid var(--border-color);
+  margin-bottom: 0.625rem;
+}
+
+.sum-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.discount-row span:last-child { color: var(--primary-color); font-weight: 600; }
+
+.free-tag {
+  color: var(--primary-color);
+  font-weight: 700;
+  font-size: 0.75rem;
+  background: rgba(27, 171, 80, 0.1);
+  padding: 0.1rem 0.5rem;
+  border-radius: 20px;
+}
+
+.tbd {
+  color: var(--text-secondary);
+  font-style: italic;
+  font-size: 0.75rem;
+}
+
+.sum-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.total-amount {
+  color: var(--primary-color);
+  font-size: 1.125rem;
+}
+
+/* ─── Bottom Spacer ───────────────────────────────────────────────────────── */
+.bottom-spacer { height: 100px; flex-shrink: 0; }
+
+/* ─── Footer ──────────────────────────────────────────────────────────────── */
 .modal-footer {
   position: sticky;
   bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 1rem 1.25rem;
-  background: var(--surface);
+  padding: 0.75rem 1rem;
+  background: var(--surface, #fff);
   border-top: 1px solid var(--border-color);
   display: flex;
-  gap: 0.75rem;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
+  flex-direction: column;
+  gap: 0;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.04);
   z-index: 10;
 }
 
-.btn {
-  padding: 1rem 1.5rem;
-  font-size: 0.9375rem;
+.button-actions {
+  display: flex;
+  gap: 0.625rem;
+}
+
+.btn-cancel {
+  flex: 0 0 auto;
+  padding: 0.75rem 1.25rem;
+  font-size: 0.875rem;
   font-weight: 600;
-  border-radius: 12px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border-color);
+  background: var(--surface, #fff);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: 0.15s;
+}
+.btn-cancel:active:not(:disabled) { transform: scale(0.97); }
+
+.btn-place-order {
+  flex: 1;
+  padding: 0.75rem 1.5rem;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  border-radius: 10px;
   border: none;
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  text-align: center;
-  position: relative;
-  overflow: hidden;
+  color: #fff;
+  background: var(--primary-color);
+  transition: 0.2s;
   display: flex;
-  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
 }
-
-.btn.confirm {
-  background: linear-gradient(135deg, #10b981 0%, var(--primary-color) 100%);
-  color: white;
-  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.25);
-}
-
-.btn.confirm:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
-.btn.confirm:disabled {
-  background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%);
+.btn-place-order:active:not(:disabled) { transform: scale(0.97); opacity: 0.9; }
+.btn-place-order:disabled {
+  background: #d1d5db;
   cursor: not-allowed;
-  box-shadow: none;
-  opacity: 0.6;
+  color: #9ca3af;
 }
 
-.btn.cancel {
-  background: var(--surface);
-  color: var(--text-secondary);
-  border: 2px solid var(--border-color);
+/* ─── Spinner ─────────────────────────────────────────────────────────────── */
+.btn-loading { display: flex; align-items: center; gap: 0.375rem; }
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-.btn.cancel:active:not(:disabled) {
-  transform: scale(0.98);
-  background: var(--surface-hover);
-}
-
-.error {
+/* ─── Debug Info ──────────────────────────────────────────────────────────── */
+.debug-info {
   font-size: 0.75rem;
-  color: #ef4444;
-  margin-top: 0.375rem;
-  font-weight: 500;
+  color: var(--error-color, #e11d48);
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(225, 29, 72, 0.05);
+  border-radius: 6px;
+  border: 1px solid rgba(225, 29, 72, 0.2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
 }
 
-/* Tablet and Desktop */
-@media (min-width: 768px) {
-  .modal-overlay {
-    padding: 1.5rem;
-  }
+.debug-label {
+  font-weight: 600;
+}
 
+.debug-item {
+  background: rgba(225, 29, 72, 0.1);
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+}
+
+/* ─── Tablet / Desktop ────────────────────────────────────────────────────── */
+@media (min-width: 640px) {
   .modal-container {
-    max-width: 600px;
+    max-width: 520px;
     height: auto;
-    max-height: 90dvh;
-    border-radius: 20px;
+    max-height: 92dvh;
+    border-radius: 16px;
     border: 1px solid var(--border-color);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.12);
   }
 
-  .modal-header {
-    padding: 1.5rem;
-  }
-
-  .modal-title {
-    font-size: 1.5rem;
-  }
-
-  .close-button {
-    width: 36px;
-    height: 36px;
-  }
-
-  .modal-body {
-    padding: 1.5rem;
-    gap: 1.25rem;
-  }
-
-  .card {
-    padding: 1.5rem;
-  }
-
-  .section-title {
-    font-size: 1.125rem;
-  }
-
-  .item-img {
-    width: 64px;
-    height: 64px;
-  }
-
-  .item-label {
-    font-size: 0.9375rem;
-  }
-
-  .modal-footer {
-    padding: 1.5rem;
-    flex-direction: row;
-  }
-
-  .btn {
-    flex: 1;
-  }
-
-  .btn.confirm {
-    order: 2;
-  }
-
-  .btn.cancel {
-    order: 1;
-  }
-
-  .bottom-spacer {
-    display: none;
-  }
+  .modal-body { padding: 1rem 1.25rem 0; gap: 0.875rem; }
+  .card { padding: 1.125rem 1.25rem; }
+  .section-title { font-size: 1rem; }
+  .item-img { width: 52px; height: 52px; }
+  .modal-footer { padding: 1rem 1.25rem; }
+  .bottom-spacer { display: none; }
 }
 
-/* Large Desktop */
 @media (min-width: 1024px) {
-  .modal-container {
-    max-width: 700px;
-  }
+  .modal-container { max-width: 560px; }
 }
 </style>

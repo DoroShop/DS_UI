@@ -76,7 +76,15 @@ const form = reactive<EditProductForm>({
     startDate: null,
     endDate: null,
     freeShipping: false
-  }
+  },
+  // J&T Shipping Profile
+  weightKg: props.product.weightKg || null,
+  lengthCm: props.product.lengthCm || null,
+  widthCm: props.product.widthCm || null,
+  heightCm: props.product.heightCm || null,
+  // Shipping Discount
+  shippingDiscountType: props.product.shippingDiscountType || 'NONE',
+  shippingDiscountValue: props.product.shippingDiscountValue || 0
 })
 
 const addOption = () => {
@@ -139,7 +147,14 @@ const updateProduct = async (): Promise<void> => {
       description: form.description,
       price: hasOption.value ? undefined : form.price,
       stock: hasOption.value ? undefined : form.stock,
-      option: hasOption.value ? form.option : undefined
+      option: hasOption.value ? form.option : undefined,
+      // J&T Shipping Profile
+      weightKg: form.weightKg || undefined,
+      lengthCm: form.lengthCm || undefined,
+      widthCm: form.widthCm || undefined,
+      heightCm: form.heightCm || undefined,
+      shippingDiscountType: form.shippingDiscountType,
+      shippingDiscountValue: form.shippingDiscountType !== 'NONE' ? form.shippingDiscountValue : 0
     })
   })
 
@@ -303,6 +318,30 @@ const handleSubmit = async (): Promise<void> => {
           }
         }
       }
+    }
+
+    // Validate shipping profile (if any field is set, validate all)
+    if (form.weightKg !== null || form.lengthCm !== null || form.widthCm !== null || form.heightCm !== null) {
+      if (form.weightKg !== null && form.weightKg < 0.01) {
+        throw new Error('Weight must be at least 0.01 kg')
+      }
+      if (form.lengthCm !== null && form.lengthCm < 1) {
+        throw new Error('Length must be at least 1 cm')
+      }
+      if (form.widthCm !== null && form.widthCm < 1) {
+        throw new Error('Width must be at least 1 cm')
+      }
+      if (form.heightCm !== null && form.heightCm < 1) {
+        throw new Error('Height must be at least 1 cm')
+      }
+    }
+
+    // Validate shipping discount
+    if (form.shippingDiscountType === 'PERCENT' && form.shippingDiscountValue > 100) {
+      throw new Error('Shipping discount percentage cannot exceed 100%')
+    }
+    if (form.shippingDiscountType === 'FIXED' && form.shippingDiscountValue < 0) {
+      throw new Error('Shipping discount amount cannot be negative')
     }
 
     // Update product data
@@ -581,6 +620,105 @@ const discountedPrice = (originalPrice: number, promotion: any) => {
         <button type="button" class="add-button" @click="addOption">Add Option</button>
       </div>
 
+      <!-- J&T Shipping Profile Section -->
+      <div class="form-group">
+        <h3 class="section-title">📦 J&T Shipping Profile (Optional)</h3>
+        <p class="section-description">Update weight and dimensions for J&T Express shipping</p>
+        
+        <div class="shipping-grid">
+          <div class="form-field">
+            <label>Weight (kg)</label>
+            <input
+              type="number"
+              v-model.number="form.weightKg"
+              step="0.01"
+              min="0.01"
+              placeholder="0.50"
+            />
+            <p class="field-hint">Minimum 0.01 kg</p>
+          </div>
+
+          <div class="form-field">
+            <label>Length (cm)</label>
+            <input
+              type="number"
+              v-model.number="form.lengthCm"
+              step="1"
+              min="1"
+              placeholder="10"
+            />
+            <p class="field-hint">Minimum 1 cm</p>
+          </div>
+
+          <div class="form-field">
+            <label>Width (cm)</label>
+            <input
+              type="number"
+              v-model.number="form.widthCm"
+              step="1"
+              min="1"
+              placeholder="10"
+            />
+            <p class="field-hint">Minimum 1 cm</p>
+          </div>
+
+          <div class="form-field">
+            <label>Height (cm)</label>
+            <input
+              type="number"
+              v-model.number="form.heightCm"
+              step="1"
+              min="1"
+              placeholder="5"
+            />
+            <p class="field-hint">Minimum 1 cm</p>
+          </div>
+        </div>
+
+        <div class="shipping-discount-section">
+          <h4>Shipping Discount</h4>
+          <p class="section-description">Offer customers a discount on J&T shipping for this product</p>
+          
+          <div class="discount-grid">
+            <div class="form-field">
+              <label>Discount Type</label>
+              <select v-model="form.shippingDiscountType">
+                <option value="NONE">No Discount</option>
+                <option value="FIXED">Fixed Amount (₱)</option>
+                <option value="PERCENT">Percentage (%)</option>
+              </select>
+            </div>
+
+            <div class="form-field" v-if="form.shippingDiscountType !== 'NONE'">
+              <label>
+                {{ form.shippingDiscountType === 'FIXED' ? 'Discount Amount (₱)' : 'Discount Percentage (%)' }}
+              </label>
+              <input
+                type="number"
+                v-model.number="form.shippingDiscountValue"
+                :step="form.shippingDiscountType === 'FIXED' ? '0.01' : '1'"
+                :min="0"
+                :max="form.shippingDiscountType === 'PERCENT' ? 100 : undefined"
+                :placeholder="form.shippingDiscountType === 'FIXED' ? '10.00' : '15'"
+              />
+              <p class="field-hint" v-if="form.shippingDiscountType === 'PERCENT'">Maximum 100%</p>
+              <p class="field-hint" v-else>Enter the discount amount in pesos</p>
+            </div>
+          </div>
+
+          <div v-if="form.shippingDiscountType !== 'NONE' && form.shippingDiscountValue > 0" class="discount-preview">
+            <p>
+              <strong>Customer will save:</strong>
+              {{ form.shippingDiscountType === 'FIXED' 
+                ? `₱${form.shippingDiscountValue.toFixed(2)}` 
+                : `${form.shippingDiscountValue}%` 
+              }}
+              on J&T shipping for this product
+            </p>
+          </div>
+        </div>
+      </div>
+
       <button 
         type="submit" 
         class="submit-button" 
@@ -691,6 +829,62 @@ textarea:focus,
 textarea {
   min-height: 100px;
   resize: vertical;
+}
+
+/* Shipping Profile Styles */
+.section-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
+}
+
+.section-description {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0 0 16px 0;
+}
+
+.shipping-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.shipping-discount-section {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-color);
+}
+
+.discount-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.discount-preview {
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(22, 163, 74, 0.08));
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 8px;
+  color: var(--text-primary);
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+  .shipping-grid,
+  .discount-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 button {

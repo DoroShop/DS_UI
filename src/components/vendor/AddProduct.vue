@@ -124,7 +124,14 @@ const form = reactive({
     startDate: '',
     endDate: '',
     freeShipping: false
-  }
+  },
+  // J&T Shipping Profile
+  weightKg: null as number | null,
+  lengthCm: null as number | null,
+  widthCm: null as number | null,
+  heightCm: null as number | null,
+  shippingDiscountType: 'NONE' as 'NONE' | 'FIXED' | 'PERCENT',
+  shippingDiscountValue: 0
 })
 
 onUnmounted(async () => {
@@ -710,7 +717,13 @@ async function submitProduct() {
       imageUrls: [],
       categories: [],
       isOption: false,
-      option: []
+      option: [],
+      weightKg: null,
+      lengthCm: null,
+      widthCm: null,
+      heightCm: null,
+      shippingDiscountType: 'NONE',
+      shippingDiscountValue: 0
     })
   } catch (error) {
     Alert('Product failed to create!', 'error', 'var(--secondary-color)', 1500)
@@ -766,7 +779,13 @@ async function cancelProductCreation() {
     imageUrls: [],
     categories: [],
     isOption: false,
-    option: []
+    option: [],
+    weightKg: null,
+    lengthCm: null,
+    widthCm: null,
+    heightCm: null,
+    shippingDiscountType: 'NONE',
+    shippingDiscountValue: 0
   })
   
   // Reset pending images
@@ -1013,6 +1032,113 @@ async function cancelProductCreation() {
                   class="field-input"
                   :min="form.promotion.startDate || undefined" 
                 />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- J&T Shipping Profile Card -->
+        <section class="form-card">
+          <div class="card-header">
+            <span class="card-icon">📦</span>
+            <h2 class="card-title">J&T Shipping Profile</h2>
+            <span class="card-badge">Optional</span>
+          </div>
+
+          <div class="card-body">
+            <p class="card-description">Set weight and dimensions for J&T Express shipping. Required for buyers to use J&T delivery.</p>
+
+            <div class="shipping-profile-grid">
+              <div class="form-field">
+                <label class="field-label">Weight (kg) <span class="required">*</span></label>
+                <div class="input-with-prefix">
+                  <span class="input-prefix">kg</span>
+                  <input
+                    v-model.number="form.weightKg"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    class="field-input with-prefix"
+                    placeholder="0.50"
+                  />
+                </div>
+                <p class="field-hint">Minimum 0.01 kg</p>
+              </div>
+
+              <div class="form-field">
+                <label class="field-label">Length (cm)</label>
+                <input
+                  v-model.number="form.lengthCm"
+                  type="number"
+                  step="1"
+                  min="1"
+                  class="field-input"
+                  placeholder="10"
+                />
+              </div>
+
+              <div class="form-field">
+                <label class="field-label">Width (cm)</label>
+                <input
+                  v-model.number="form.widthCm"
+                  type="number"
+                  step="1"
+                  min="1"
+                  class="field-input"
+                  placeholder="10"
+                />
+              </div>
+
+              <div class="form-field">
+                <label class="field-label">Height (cm)</label>
+                <input
+                  v-model.number="form.heightCm"
+                  type="number"
+                  step="1"
+                  min="1"
+                  class="field-input"
+                  placeholder="5"
+                />
+              </div>
+            </div>
+
+            <div class="shipping-discount-section">
+              <h3 class="discount-section-title">Shipping Discount</h3>
+              <p class="card-description">Offer your customers a discount on J&T shipping for this product</p>
+
+              <div class="shipping-discount-grid">
+                <div class="form-field">
+                  <label class="field-label">Discount Type</label>
+                  <select v-model="form.shippingDiscountType" class="field-input">
+                    <option value="NONE">No Discount</option>
+                    <option value="FIXED">Fixed Amount (₱)</option>
+                    <option value="PERCENT">Percentage (%)</option>
+                  </select>
+                </div>
+
+                <div class="form-field" v-if="form.shippingDiscountType !== 'NONE'">
+                  <label class="field-label">
+                    {{ form.shippingDiscountType === 'FIXED' ? 'Discount Amount (₱)' : 'Discount (%)' }}
+                  </label>
+                  <input
+                    v-model.number="form.shippingDiscountValue"
+                    type="number"
+                    :step="form.shippingDiscountType === 'FIXED' ? '0.01' : '1'"
+                    :min="0"
+                    :max="form.shippingDiscountType === 'PERCENT' ? 100 : undefined"
+                    class="field-input"
+                    :placeholder="form.shippingDiscountType === 'FIXED' ? '10.00' : '15'"
+                  />
+                  <p class="field-hint" v-if="form.shippingDiscountType === 'PERCENT'">Maximum 100%</p>
+                </div>
+              </div>
+
+              <div v-if="form.shippingDiscountType !== 'NONE' && form.shippingDiscountValue > 0" class="shipping-discount-preview">
+                <span class="preview-icon">💰</span>
+                <span>Customer saves 
+                  <strong>{{ form.shippingDiscountType === 'FIXED' ? `₱${form.shippingDiscountValue.toFixed(2)}` : `${form.shippingDiscountValue}%` }}</strong>
+                  on J&T shipping for this product
+                </span>
               </div>
             </div>
           </div>
@@ -2370,5 +2496,62 @@ async function cancelProductCreation() {
 
 .form-card {
   animation: fadeIn 0.3s ease-out;
+}
+
+/* J&T Shipping Profile */
+.shipping-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.field-hint {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.shipping-discount-section {
+  margin-top: 8px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-primary);
+}
+
+.discount-section-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 4px 0;
+}
+
+.shipping-discount-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.shipping-discount-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(22, 163, 74, 0.08));
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 10px;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.preview-icon {
+  font-size: 1.1rem;
+}
+
+@media (max-width: 640px) {
+  .shipping-profile-grid,
+  .shipping-discount-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

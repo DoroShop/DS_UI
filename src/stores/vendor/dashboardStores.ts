@@ -306,11 +306,23 @@ export const useVendorDashboardStore = defineStore("vendor-dashboard", {
         isHot: !!raw.isHot,
         isApproved: !!raw.isApproved,
         status: raw.status || "pending_review",
+        rejectionReason: raw.rejectionReason || undefined,
+        rejectedAt: raw.rejectedAt || undefined,
         averageRating: Number(raw.averageRating ?? 0),
         numReviews: Number(raw.numReviews ?? 0),
         municipality: raw.municipality ? String(raw.municipality) : "",
         createdAt: raw.createdAt,
         updatedAt: raw.updatedAt,
+        promotion: raw.promotion || undefined,
+        hasPromotion: raw.hasPromotion,
+        promotionStatus: raw.promotionStatus,
+        // J&T Shipping Profile
+        weightKg: raw.weightKg ?? null,
+        lengthCm: raw.lengthCm ?? null,
+        widthCm: raw.widthCm ?? null,
+        heightCm: raw.heightCm ?? null,
+        shippingDiscountType: raw.shippingDiscountType || 'NONE',
+        shippingDiscountValue: Number(raw.shippingDiscountValue ?? 0),
       };
 
       recomputeAggregates(product);
@@ -875,6 +887,76 @@ export const useVendorDashboardStore = defineStore("vendor-dashboard", {
       } catch (err: any) {
         Alert(`Vendor update failed: ${err?.response?.data?.message || err?.message}`, "error", "var(--secondary-color)");
         console.error("Vendor update error:", err);
+        throw err;
+      }
+    },
+
+    // ─── Pinned Products (Subscription Benefit) ─────────────────
+    async getPinnedProducts() {
+      try {
+        const { data } = await axios.get(`${API_BASE_URL}/vendor/pinned-products`, { headers: getHeaders() });
+        return data?.data || [];
+      } catch (err: any) {
+        console.error("Get pinned products error:", err);
+        return [];
+      }
+    },
+
+    async pinProduct(productId: string) {
+      try {
+        const { data } = await axios.post(
+          `${API_BASE_URL}/vendor/pin-product`,
+          { productId },
+          { headers: getHeaders() },
+        );
+        Alert("Product pinned to Featured!", "success", "var(--primary-color)");
+        return data;
+      } catch (err: any) {
+        const msg = err?.response?.data?.error || err?.message || "Failed to pin product";
+        Alert(msg, "error", "var(--secondary-color)");
+        throw err;
+      }
+    },
+
+    async unpinProduct(productId: string) {
+      try {
+        const { data } = await axios.delete(`${API_BASE_URL}/vendor/pin-product/${productId}`, {
+          headers: getHeaders(),
+        });
+        Alert("Product unpinned from Featured.", "success", "var(--primary-color)");
+        return data;
+      } catch (err: any) {
+        const msg = err?.response?.data?.error || err?.message || "Failed to unpin product";
+        Alert(msg, "error", "var(--secondary-color)");
+        throw err;
+      }
+    },
+
+    async updateShopLocation(latitude: number, longitude: number) {
+      try {
+        const { data } = await axios.patch(
+          `${API_BASE_URL}/api/shops/location`,
+          { latitude, longitude },
+          { headers: getHeaders() },
+        );
+        Alert("Shop location updated!", "success", "var(--primary-color)");
+        // Refresh vendor data to get the updated location
+        await this.fetchVendor();
+        return data;
+      } catch (err: any) {
+        Alert(`Location update failed: ${err?.response?.data?.error || err?.message}`, "error", "var(--secondary-color)");
+        throw err;
+      }
+    },
+
+    async removeShopLocation() {
+      try {
+        const { data } = await axios.delete(`${API_BASE_URL}/api/shops/location`, { headers: getHeaders() });
+        Alert("Shop location removed.", "success", "var(--primary-color)");
+        await this.fetchVendor();
+        return data;
+      } catch (err: any) {
+        Alert(`Failed to remove location: ${err?.response?.data?.error || err?.message}`, "error", "var(--secondary-color)");
         throw err;
       }
     },

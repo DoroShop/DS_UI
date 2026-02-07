@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from "vue";
 import axios from "axios";
 import { getAuthHeaders } from "../../types/shared";
+import { Toast } from "../../components/composable/Toast.js";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -104,7 +105,7 @@ const savePlan = async (plan) => {
       editPlanDraft.value = null;
     }
   } catch (err) {
-    alert("Save failed: " + (err?.response?.data?.message || err?.message || "Unknown error"));
+    Toast('Save failed: ' + (err?.response?.data?.message || err?.message || 'Unknown error'), 'error');
   } finally {
     busy.value = false;
   }
@@ -133,7 +134,7 @@ const deletePlan = async (planId) => {
     });
     await fetchPlans();
   } catch (err) {
-    alert("Delete failed");
+    Toast('Delete failed', 'error');
   }
 };
 
@@ -145,7 +146,7 @@ const updateSubscription = async (subId, updates) => {
     await fetchSubscriptions();
     await fetchPlans();
   } catch (err) {
-    alert("Update failed");
+    Toast('Update failed', 'error');
   }
 };
 

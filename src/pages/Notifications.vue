@@ -280,6 +280,7 @@ onMounted(async () => {
   padding: 1.5rem;
   max-width: 800px;
   margin: 0 auto;
+  margin-bottom: 4rem;
 }
 
 .page-header {
@@ -302,7 +303,7 @@ onMounted(async () => {
 }
 
 .header-title h1 {
-  font-size: 1.75rem;
+  font-size: clamp(1.5rem, 4vw, 2rem);
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;
@@ -317,7 +318,7 @@ onMounted(async () => {
   padding: 0 0.5rem;
   background: #ef4444;
   color: white;
-  font-size: 0.75rem;
+  font-size: clamp(0.75rem, 2vw, 0.875rem);
   font-weight: 700;
   border-radius: 9999px;
 }
@@ -325,6 +326,7 @@ onMounted(async () => {
 .header-subtitle {
   color: var(--text-secondary);
   margin-top: 0.25rem;
+  font-size: clamp(0.8rem, 2vw, 1rem);
 }
 
 .header-actions {
@@ -543,6 +545,7 @@ onMounted(async () => {
 .notification-content {
   flex: 1;
   min-width: 0;
+  
 }
 
 .notification-header {

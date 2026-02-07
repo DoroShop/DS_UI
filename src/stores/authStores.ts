@@ -270,6 +270,9 @@ export const useAuthStore = defineStore("auth", {
       }
       
       console.log('✨ Auth store logout completed');
+
+      // Force a full page reload to clear all in-memory state
+      window.location.href = '/';
     },
 
     // Method to verify logout was successful by checking session

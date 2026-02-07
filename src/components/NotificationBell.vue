@@ -195,27 +195,23 @@ onUnmounted(() => {
   position: relative;
   display: flex;
   align-items: center;
+
+  
 }
 
 .bell-button {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.5rem;
-  background: none;
-  border: none;
-  color: var(--text-white);
-  cursor: pointer;
-  border-radius: 0.375rem;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  min-height: 2.75rem;
-  min-width: 2.75rem;
+border: 0;
+background: none;
+display: flex;
+align-items: center;
+justify-content: center;
+cursor: pointer;
+
 }
 
 .bell-button:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  transform: scale(1.05);
+
+    transform: scale(1.05);
 }
 
 .bell-icon {
@@ -225,17 +221,14 @@ onUnmounted(() => {
   transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.bell-button.has-unread .bell-icon {
-  color: var(--primary-color);
-}
 
 .unread-badge {
   position: absolute;
-  top: 0;
-  right: 0;
+  top: -5px;
+  right: -7px;
   min-width: 1.125rem;
   height: 1.125rem;
-  padding: 0 0.25rem;
+  padding:.6rem .5rem;
   background-color: var(--primary-color-2);
   color: white;
   font-size: 0.625rem;
@@ -249,7 +242,7 @@ onUnmounted(() => {
 /* Dropdown */
 .dropdown-menu {
   position: absolute;
-  top: calc(100% + 0.5rem);
+  top: calc(100% + 1rem);
   right: 0;
   width: 360px;
   max-height: 480px;
@@ -299,6 +292,7 @@ onUnmounted(() => {
 .dropdown-body {
   max-height: 320px;
   overflow-y: auto;
+  
 }
 
 .loading-state,
@@ -466,13 +460,25 @@ onUnmounted(() => {
 }
 
 /* Responsive */
-@media (max-width: 640px) {
+@media (max-width: 820px) {
   .dropdown-menu {
     position: fixed;
-    top: 3.5rem;
+    top: 4.2rem;
     right: 0.5rem;
-    left: 0.5rem;
     width: auto;
+    max-width: 300px;
+  }
+
+  .unread-badge{
+    background-color: var(--secondary-color);
+  }
+
+  .bell-button {
+       background-color: rgba(255, 255, 255, 0.1);
+       padding: 0.5rem;
+       border-radius: 5px;
+       width: 45px;
+       aspect-ratio: 1;
   }
 }
 </style>

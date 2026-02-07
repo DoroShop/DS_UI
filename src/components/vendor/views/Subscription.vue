@@ -8,10 +8,10 @@ import {
 } from "@heroicons/vue/24/outline";
 import { useSubscriptionStore } from "../../../stores/vendor/subscriptionStore";
 import { useVendorDashboardStore } from "../../../stores/vendor/dashboardStores";
+import { Toast } from "../../../components/composable/Toast.js";
 import { formatToPHCurrency } from "../../../utils/currencyFormat.js";
 import { pollPaymentStatus } from "../../../utils/paymentApi";
 import QRCodePaymentModal from "../../../components/QRCodePaymentModal.vue";
-import { Toast } from "../../../components/composable/Toast.js";
 import axios from "axios";
 import { getAuthHeaders } from "../../../types/shared";
 
@@ -232,8 +232,8 @@ const confirmChangePlan = async () => {
       selectedPaymentMethod.value === "wallet" &&
       finalPrice > vendorDashboardStore.walletBalance
     ) {
-      alert(
-        "Insufficient wallet balance. Please choose QRPH payment or top up your wallet.",
+      Toast(
+        "Insufficient wallet balance. Please choose QRPH payment or top up your wallet.", 'error'
       );
       return;
     }

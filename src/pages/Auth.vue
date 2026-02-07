@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onMounted, watch } from "vue";
-import { EyeIcon, EyeSlashIcon } from "@heroicons/vue/24/outline";
+import { EyeIcon, EyeSlashIcon, ArrowLeftIcon } from "@heroicons/vue/24/outline";
 import { useAuthStore } from "../stores/authStores";
 import { useLocationStore } from "../stores/locationStore";
 import { useTheme } from "../composables/useTheme";
@@ -29,6 +29,14 @@ const statusMsg = ref("");
 function switchView(v) {
   view.value = v;
   statusMsg.value = "";
+
+  // Smooth scroll the auth card back to top on view change
+  nextTick(() => {
+    const card = document.querySelector('.auth-card');
+    if (card) card.scrollTo({ top: 0, behavior: 'smooth' });
+    const form = card?.querySelector('.auth-form, .verify-wrapper');
+    if (form) form.scrollTo({ top: 0, behavior: 'smooth' });
+  });
   
   // Clear relevant error states when switching views
   if (v === "login") {
@@ -569,10 +577,15 @@ async function handleFacebook() {
 
 <template>
   <div class="auth-wrapper" :data-mode="view">
-    <button class="logo" @click="goToHome" title="Go to Home Page">
-      <img src="../assets/DoroShop-colored-logo.png" alt="" />
-      <h1>DoroShop</h1>
-    </button>
+    <div class="logo-bar">
+      <button class="back-btn" @click="router.back()" title="Go Back">
+        <ArrowLeftIcon class="back-icon" />
+      </button>
+      <button class="logo" @click="goToHome" title="Go to Home Page">
+        <img src="../assets/DoroShop-colored-logo.png" alt="" />
+        <h1>DoroShop</h1>
+      </button>
+    </div>
 
     <div class="auth-card">
       <nav class="auth-tabs" role="tablist">
@@ -779,6 +792,15 @@ async function handleFacebook() {
         <p v-if="authStore.registerError" class="login-error">
           {{ authStore.registerError }}
         </p>
+
+        <div class="divider"><span>or continue with</span></div>
+
+        <div class="social-row">
+          <button type="button" class="btn social google" @click="handleGoogle">
+            <img src="../assets/icons8-google-32.png" alt="" />
+            <span>Google</span>
+          </button>
+        </div>
       </form>
 
       <!-- OTP -->
@@ -987,7 +1009,10 @@ async function handleFacebook() {
   align-items: center;
 
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
 
   padding: 24px 14px;
   color: var(--text);
@@ -1027,6 +1052,41 @@ async function handleFacebook() {
 /* =========================
    Logo
    ========================= */
+.logo-bar {
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.85);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.back-btn:hover {
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(34,197,94,0.45);
+  color: #fff;
+  transform: translateX(-2px);
+}
+
+.back-icon {
+  width: 20px;
+  height: 20px;
+}
+
 .logo {
   z-index: 2;
   border: 0;
@@ -1038,7 +1098,6 @@ async function handleFacebook() {
   justify-content: center;
   gap: 10px;
 
-  margin-bottom: 14px;
   padding: 10px 12px;
   border-radius: 14px;
 
@@ -1059,6 +1118,8 @@ async function handleFacebook() {
 
 .logo h1 {
   margin: 0;
+  margin-top: 10px;
+  margin-left: -10px;
   font-size: 1.5rem;
   letter-spacing: -0.02em;
   color: #fff;
@@ -1125,6 +1186,12 @@ async function handleFacebook() {
 @keyframes cardIn {
   from { opacity: 0; transform: translateY(14px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
+
+}
+
+/* Smooth view transition wrapper */
+.auth-card > *:not(.auth-tabs) {
+  transition: opacity 0.28s ease, transform 0.28s ease;
 }
 
 /* =========================
@@ -1216,6 +1283,22 @@ async function handleFacebook() {
   padding: 6px 8px 4px;
   max-height: min(72dvh, 620px);
   overflow: auto;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+
+  /* Smooth view transitions */
+  animation: formFadeIn 380ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+@keyframes formFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* pretty scrollbar */
@@ -1800,5 +1883,7 @@ select:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .auth-card { animation: none; }
   .auth-tab, .btn, input, select { transition: none; }
+  .auth-form, .verify-wrapper { animation: none; }
+  .auth-card > *:not(.auth-tabs) { transition: none; }
 }
 </style>

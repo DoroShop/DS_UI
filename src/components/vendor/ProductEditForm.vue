@@ -160,6 +160,11 @@ function toggleCategory(category: string) {
 }
 
 onMounted(() => {
+  // Filter categories to only include valid fixedCategories entries
+  // This cleans up any corrupted entries (e.g. &amp; encoding from previous saves)
+  const loadedCategories = [...(props.product.categories || [])];
+  const validCategories = loadedCategories.filter(cat => fixedCategories.includes(cat));
+
   Object.assign(form, {
     name: props.product.name,
     description: props.product.description || "",
@@ -167,7 +172,7 @@ onMounted(() => {
     stock: props.product.stock,
     imageUrls: [...props.product.imageUrls],
     municipality: props.product.municipality,
-    categories: [...(props.product.categories || [])],
+    categories: validCategories,
     promotion: props.product.promotion ? { ...props.product.promotion } : {
       isActive: false,
       discountType: 'none',

@@ -848,9 +848,9 @@ const getUserAvatar = (user: any) => {
               <p>No Image Available</p>
             </div>
             <!-- Wishlist Button -->
-            <button class="wishlist-btn" @click="toggleWishlist" :class="{ active: isWishlisted }">
+            <!-- <button class="wishlist-btn" @click="toggleWishlist" :class="{ active: isWishlisted }">
               <HeartIcon class="heart-icon" />
-            </button>
+            </button> -->
           </div>
 
           <div class="thumb-con">

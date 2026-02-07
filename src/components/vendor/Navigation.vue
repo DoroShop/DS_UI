@@ -1,9 +1,9 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, onBeforeUnmount } from 'vue'
 import {
   ChartBarIcon,
   CubeIcon,
-ChartPieIcon,
+  ChartPieIcon,
   ShoppingBagIcon,
   CogIcon,
   UserCircleIcon,
@@ -11,7 +11,9 @@ ChartPieIcon,
   BanknotesIcon,
   ArrowDownCircleIcon,
   CreditCardIcon,
-  TruckIcon
+  TruckIcon,
+  Bars3Icon,
+  XMarkIcon
 } from '@heroicons/vue/24/outline'
 import { useMessageStore } from '@/stores/messageStore'
 
@@ -19,13 +21,18 @@ const props = defineProps({
   active: {
     type: String,
     default: 'Analytics'
+  },
+  isMobileMenuOpen: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emits = defineEmits(['navigate'])
+const emits = defineEmits(['navigate', 'closeMobileMenu'])
 const messageStore = useMessageStore()
 
 const current = ref(props.active)
+const mobileMenuRef = ref(null)
 
 const unreadMessagesCount = computed(() => messageStore.unreadCount || 0)
 
@@ -48,6 +55,18 @@ function select(name) {
   emits('navigate', name)
 }
 
+function closeMobileMenu() {
+  emits('closeMobileMenu')
+}
+
+// Handle click outside to close menu
+function handleClickOutside(event) {
+  if (mobileMenuRef.value && !mobileMenuRef.value.contains(event.target) && 
+      !event.target.closest('.hamburger-btn')) {
+    closeMobileMenu()
+  }
+}
+
 // Watch for prop changes
 watch(() => props.active, (newActive) => {
   current.value = newActive
@@ -56,11 +75,65 @@ watch(() => props.active, (newActive) => {
 onMounted(() => {
   // Fetch unread count for vendor
   messageStore.fetchUnreadCount('vendor')
+  // Add event listener for click outside
+  document.addEventListener('click', handleClickOutside)
+})
+
+onBeforeUnmount(() => {
+  // Remove event listener
+  document.removeEventListener('click', handleClickOutside)
 })
 </script>
 
 <template>
   <div>
+    <!-- Mobile Overlay -->
+    <div 
+      class="mobile-overlay" 
+      v-if="props.isMobileMenuOpen"
+      @click="closeMobileMenu"
+    ></div>
+
+    <!-- Mobile Slide Menu -->
+    <nav 
+      ref="mobileMenuRef"
+      class="mobile-menu" 
+      :class="{ open: props.isMobileMenuOpen }"
+    >
+      <div class="mobile-menu-header">
+        <div class="mobile-logo">
+          <ChartBarIcon class="mobile-logo-icon" />
+          <h2>Vendor Dashboard</h2>
+        </div>
+        <button 
+          class="mobile-close-btn" 
+          @click="closeMobileMenu"
+          aria-label="Close menu"
+        >
+          <XMarkIcon class="close-icon" />
+        </button>
+      </div>
+      
+      <div class="mobile-nav-menu">
+        <a 
+          v-for="item in navItems" 
+          :key="item.name" 
+          href="#" 
+          class="mobile-nav-item"
+          :class="{ active: current === item.name }" 
+          @click.prevent="select(item.name)"
+        >
+          <div class="mobile-nav-item-content">
+            <component :is="item.icon" class="mobile-nav-icon" />
+            <span class="mobile-nav-text">{{ item.name }}</span>
+            <span v-if="item.badge && item.badge.value > 0" class="mobile-nav-badge">
+              {{ item.badge.value }}
+            </span>
+          </div>
+        </a>
+      </div>
+    </nav>
+
     <!-- Desktop Sidebar -->
     <aside class="sidebar">
       <div class="side-bar-fixed">
@@ -82,100 +155,159 @@ onMounted(() => {
         </div>
       </div>
     </aside>
-
-    <!-- Mobile Bottom Nav -->
-    <nav class="mobile-nav" v-show="props.active !== 'Messages'">
-      <a v-for="item in navItems" :key="item.name" href="#" class="mobile-nav-item"
-        :class="{ active: current === item.name }" @click.prevent="select(item.name)">
-        <div class="mobile-nav-item-content">
-          <component :is="item.icon" class="mobile-nav-icon" />
-          <span v-if="item.badge && item.badge.value > 0" class="mobile-badge">
-            {{ item.badge.value }}
-          </span>
-        </div>
-        <span>{{ item.name }}</span>
-      </a>
-    </nav>
   </div>
 </template>
 
 <style scoped>
-/* ========== MOBILE NAV ========== */
-.mobile-nav {
-  display: flex;
-  background: var(--surface);
-  border-top: 1px solid var(--border-primary);
+/* ========== MOBILE HAMBURGER MENU ========== */
+
+.mobile-overlay {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 100;
-  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
-}
-
-.mobile-nav-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 0.75rem 0.5rem;
-  text-decoration: none;
-  color: var(--text-secondary);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  gap: 0.25rem;
-  position: relative;
-}
-
-.mobile-nav-item:hover {
-  color: var(--color-primary);
-  background: var(--surface-hover);
-}
-
-.mobile-nav-item.active {
-  color: var(--color-primary);
-}
-
-.mobile-nav-item.active::before {
-  content: '';
-  position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: 3px;
-  background: var(--color-primary);
-  border-radius: 0 0 3px 3px;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  opacity: 0;
+  animation: fadeIn 0.3s ease forwards;
+  backdrop-filter: blur(4px);
+}
+
+@keyframes fadeIn {
+  to { opacity: 1; }
+}
+
+.mobile-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 320px;
+  max-width: 85vw;
+  height: 100vh;
+  background: var(--surface);
+  border-right: 1px solid var(--border-primary);
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  transform: translateX(-100%);
+  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  overflow-y: auto;
+}
+
+.mobile-menu.open {
+  transform: translateX(0);
+}
+
+.mobile-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--border-primary);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+}
+
+.mobile-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.mobile-logo-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--color-primary);
+}
+
+.mobile-logo h2 {
+  color: var(--text-primary);
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.mobile-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+
+.mobile-close-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.close-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.mobile-nav-menu {
+  padding: 1rem 0;
+}
+
+.mobile-nav-item {
+  display: block;
+  text-decoration: none;
+  color: var(--text-secondary);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  margin: 0 1rem;
+  border-radius: var(--radius-md);
+}
+
+.mobile-nav-item:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.mobile-nav-item.active {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
+  color: white;
+  box-shadow: 0 2px 8px rgba(31, 139, 78, 0.3);
 }
 
 .mobile-nav-item-content {
-  position: relative;
   display: flex;
   align-items: center;
-  justify-content: center;
+  padding: 1rem 1.25rem;
+  gap: 1rem;
+  position: relative;
 }
 
 .mobile-nav-icon {
   width: 20px;
   height: 20px;
+  flex-shrink: 0;
 }
 
-.mobile-badge {
-  position: absolute;
-  top: -4px;
-  right: -8px;
-  background: var(--secondary-color);
+.mobile-nav-text {
+  font-weight: 500;
+  font-size: 0.95rem;
+  flex: 1;
+}
+
+.mobile-nav-badge {
+  background: #ef4444;
   color: white;
-  font-size: 0.625rem;
+  font-size: 0.75rem;
   font-weight: 700;
-  padding: 0.125rem 0.375rem;
+  padding: 0.25rem 0.5rem;
   border-radius: 999px;
-  min-width: 16px;
+  min-width: 18px;
   text-align: center;
-  border: 2px solid var(--surface);
+  margin-left: auto;
 }
 
-.mobile-nav-item span {
-  font-size: 0.75rem;
-  font-weight: 600;
+.mobile-nav-item.active .mobile-nav-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
 }
 
 /* ========== DESKTOP SIDEBAR ========== */
@@ -192,7 +324,6 @@ onMounted(() => {
   flex-shrink: 0;
   box-shadow: var(--shadow-sm);
   overflow-y: auto;
-
 }
 
 .side-bar-fixed {
@@ -297,13 +428,29 @@ onMounted(() => {
 }
 
 /* ========== RESPONSIVE RULES ========== */
+@media (max-width: 1023px) {
+  .hamburger-btn {
+    display: flex;
+  }
+}
+
 @media (min-width: 1024px) {
-  .mobile-nav {
+  .hamburger-btn {
     display: none;
+  }
+
+  .mobile-menu,
+  .mobile-overlay {
+    display: none !important;
   }
 
   .sidebar {
     display: block;
   }
+}
+
+/* Prevent body scroll when menu is open */
+body:has(.mobile-menu.open) {
+  overflow: hidden;
 }
 </style>

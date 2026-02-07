@@ -110,7 +110,7 @@ const routes = [
     path: "/orders", 
     name: "Orders",
     component: Orders, 
-    // meta: { requiresAuth: true } 
+    meta: { requiresAuth: true } 
   },
   {
     path: "/products/search",
@@ -133,8 +133,7 @@ const routes = [
   {
     path: "/view/vendor/:id",
     name: "ViewVendor",
-    component: ViewSeller,
-    meta: {hideMobileNav: true },
+    component: ViewSeller
   },
   {
     path: "/shops/nearby",

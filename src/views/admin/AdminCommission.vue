@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import { useAdminDashboardStore } from '../../stores/admin/adminDashboardStore';
+import { Toast } from '../../components/composable/Toast.js';
 import {
   CurrencyDollarIcon,
   ChartBarIcon,
@@ -261,11 +262,11 @@ const exportReport = async (format: 'csv' | 'excel') => {
       const csvContent = convertToCSV(data);
       downloadFile(csvContent, `commission-report-${selectedYear.value}-${selectedMonth.value}.csv`, 'text/csv');
     } else {
-      alert(`Export as ${format.toUpperCase()} is not yet implemented.`);
+      Toast(`Export as ${format.toUpperCase()} is not yet implemented.`, 'error');
     }
   } catch (error) {
     console.error('Failed to export report:', error);
-    alert('Failed to export report. Please try again.');
+    Toast('Failed to export report. Please try again.', 'error');
   }
 };
 

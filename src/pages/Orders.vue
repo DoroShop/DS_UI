@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { BuildingStorefrontIcon, ChatBubbleLeftEllipsisIcon, ArrowLeftIcon } from "@heroicons/vue/24/outline"
 import { useOrderStore } from '../stores/OrderStores'
 import { useReviewStore } from '../stores/reviewStore'
+import { useAuthStore } from '../stores/authStores'
 import type { Order, OrderItem, OrderStatus, PaymentMethod, RefundStatus } from '../types/order'
 import type { ReviewableProduct } from '../types/review'
 import { handleImageError } from '../utils/fallbackImage'
@@ -21,6 +22,7 @@ defineOptions({
 
 const router = useRouter()
 
+const authStore = useAuthStore()
 const orderStore = useOrderStore()
 const reviewStore = useReviewStore()
 const orders = computed<Order[]>(() => orderStore.orders)
@@ -112,15 +114,33 @@ const cleanupInfiniteScroll = () => {
 
 onMounted(async () => {
   console.log('[Orders] onMounted')
+  
+  // Check if user is authenticated before trying to fetch orders
+  if (!authStore.isAuthenticated) {
+    console.log('[Orders] User not authenticated, redirecting to login')
+    router.push('/login')
+    return
+  }
+  
   // Skip fetch if we have cached state
   if (hasPageState('orders') && orderStore.isFetch) {
     setupInfiniteScroll()
     return
   }
   
-  await orderStore.fetchOrders()
-  await reviewStore.fetchReviewableProducts()
-  await reviewStore.fetchMyReviews()
+  try {
+    await orderStore.fetchOrders()
+    await reviewStore.fetchReviewableProducts()
+    await reviewStore.fetchMyReviews()
+  } catch (error) {
+    console.error('[Orders] Failed to fetch data:', error)
+    // Silently handle authentication errors - don't show alert
+    if (error?.response?.status === 401) {
+      router.push('/login')
+      return
+    }
+  }
+  
   setupInfiniteScroll()
 })
 

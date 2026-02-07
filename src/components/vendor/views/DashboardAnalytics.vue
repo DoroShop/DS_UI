@@ -809,11 +809,11 @@ const topLocationsPreviewFiltered = computed(() => topLocationsPreview.value.fil
 
     <!-- If the seller is not subscribed, render the Subscription management view inline -->
     <div v-if="showSubscriptionBanner" class="subscription-inline">
-      <div class="subscription-banner">
+      <!-- <div class="subscription-banner">
         <h2>Your Premium Subscription is Inactive</h2>
         <p>Subscribe to access advanced analytics and insights to grow your business.</p>
         <button class="btn primary" @click="goToSubscription">Manage Subscription</button>
-      </div>
+      </div> -->
       <Subscription />
     </div>
 
@@ -3449,7 +3449,6 @@ tbody tr:hover td {
 .subscription-banner .banner-text { color: var(--txt2); }
 .subscription-banner .banner-actions { display:flex; gap:8px }
 
-.subscription-inline { padding: 1rem 0; }
 
 /* ═══════════════════════════════════════════════════════════════
    SELLER TOOLS — Pinned Products & Shop Location

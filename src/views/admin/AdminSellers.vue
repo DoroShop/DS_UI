@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useAdminDashboardStore } from '../../stores/admin/adminDashboardStore';
 import { useAuthStore } from '../../stores/authStores';
 import { useTheme } from '../../composables/useTheme';
+import { Toast } from '../../components/composable/Toast.js';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
@@ -467,15 +468,15 @@ const createMissingVendorProfiles = async () => {
     
     if (result.success) {
       console.log('✅ Vendor profiles created:', result);
-      alert(`Success: ${result.message}`);
+      Toast(result.message, 'success');
       await fetchData(); // Refresh the sellers list
     } else {
       console.error('Failed to create vendor profiles:', result.error);
-      alert(`Error: ${result.error}`);
+      Toast(result.error, 'error');
     }
   } catch (error) {
     console.error('Error creating vendor profiles:', error);
-    alert('Error: Failed to create vendor profiles');
+    Toast('Failed to create vendor profiles', 'error');
   } finally {
     actionLoading.value = false;
   }

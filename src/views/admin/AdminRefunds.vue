@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import { useAdminDashboardStore } from '../../stores/admin/adminDashboardStore';
+import { Toast } from '../../components/composable/Toast.js';
 import {
   ArrowPathIcon,
   MagnifyingGlassIcon,
@@ -148,7 +149,7 @@ const processAction = async () => {
     await fetchRefunds();
   } catch (error) {
     console.error('Failed to process refund:', error);
-    alert('Failed to process refund. Please try again.');
+    Toast('Failed to process refund. Please try again.', 'error');
   } finally {
     isSubmitting.value = false;
   }

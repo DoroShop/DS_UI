@@ -6,7 +6,6 @@ import type {
   ShippingQuoteResponse,
   ShippingQuoteResult,
   ShippingAddress,
-  ShippingErrorIssue
 } from '../types/shipping'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
@@ -18,9 +17,6 @@ function toCode(value: string): string {
 
 /**
  * Build the payload expected by POST /v1/shipping/jnt/quote.
- *
- * Accepts a destination that may carry province/city *or* provinceCode/cityCode
- * (or both) and normalises it so the backend always gets provinceCode + cityCode.
  */
 export function buildJntQuotePayload(
   destination: Record<string, any>,
@@ -39,8 +35,6 @@ export function buildJntQuotePayload(
       productId: String(i.productId),
       quantity: Number(i.quantity) || 1
     })),
-    serviceType: 'EZ',
-    toggles: { itemAdditionalFee: false, itemSize: false }
   }
 }
 
@@ -51,7 +45,7 @@ export const useShippingStore = defineStore('shipping', {
     quoteError: null as string | null,
     missingProfiles: [] as string[],
     addresses: [] as ShippingAddress[],
-    isLoadingAddresses: false
+    isLoadingAddresses: false,
   }),
 
   getters: {
@@ -60,27 +54,40 @@ export const useShippingStore = defineStore('shipping', {
     },
 
     totalShippingFee: (state): number => {
-      return state.currentQuote?.summary?.totalFinalShippingFeePhp ?? 0
-    },
-
-    totalShippingDiscount: (state): number => {
-      return state.currentQuote?.summary?.totalShippingDiscountPhp ?? 0
-    },
-
-    totalBaseShipping: (state): number => {
-      return state.currentQuote?.summary?.totalBaseShippingFeePhp ?? 0
+      return state.currentQuote?.totals?.shippingFeeTotal ?? 0
     },
 
     shipmentCount: (state): number => {
       return state.currentQuote?.shipments?.length ?? 0
-    }
+    },
+
+    shipments: (state) => {
+      return state.currentQuote?.shipments ?? []
+    },
+
+    quoteId: (state): string | null => {
+      return state.currentQuote?.quoteId ?? null
+    },
   },
 
   actions: {
     /**
-     * Low-level call — accepts a fully-formed ShippingQuoteRequest.
+     * Request a unified J&T shipping quote from the backend.
+     * The backend auto-selects bag pricing (≤8kg) or rate table (9–50kg).
      */
-    async calculateShippingQuote(request: ShippingQuoteRequest): Promise<ShippingQuoteResult> {
+    async quoteJnt(
+      destination: Record<string, any>,
+      items: Array<{ productId: string; quantity: number | string }>
+    ): Promise<ShippingQuoteResult> {
+      const payload = buildJntQuotePayload(destination, items)
+
+      // Pre-validate so we don't waste a round-trip
+      if (!payload.destination.provinceCode || !payload.destination.cityCode) {
+        const msg = 'Province and city are required for J&T shipping.'
+        this.quoteError = 'INVALID_ADDRESS'
+        return { success: false, error: msg, issue: 'INVALID_ADDRESS' }
+      }
+
       this.isLoadingQuote = true
       this.quoteError = null
       this.missingProfiles = []
@@ -90,7 +97,7 @@ export const useShippingStore = defineStore('shipping', {
         const headers = getAuthHeaders()
         const response = await axios.post(
           `${API_BASE_URL}/shipping/jnt/quote`,
-          request,
+          payload,
           { headers }
         )
 
@@ -120,27 +127,6 @@ export const useShippingStore = defineStore('shipping', {
       } finally {
         this.isLoadingQuote = false
       }
-    },
-
-    /**
-     * High-level convenience — builds the payload from raw address + cart items
-     * and calls the quote endpoint. This is the preferred entry point for the
-     * checkout flow.
-     */
-    async quoteJnt(
-      destination: Record<string, any>,
-      items: Array<{ productId: string; quantity: number | string }>
-    ): Promise<ShippingQuoteResult> {
-      const payload = buildJntQuotePayload(destination, items)
-
-      // Pre-validate so we don't waste a round-trip
-      if (!payload.destination.provinceCode || !payload.destination.cityCode) {
-        const msg = 'Province and city are required for J&T shipping.'
-        this.quoteError = 'INVALID_ADDRESS'
-        return { success: false, error: msg, issue: 'INVALID_ADDRESS' }
-      }
-
-      return this.calculateShippingQuote(payload)
     },
 
     async fetchAddresses(province: string = 'ORIENTAL-MINDORO'): Promise<ShippingAddress[]> {
@@ -177,7 +163,9 @@ export const useShippingStore = defineStore('shipping', {
         INVALID_ADDRESS: 'Address not supported for J&T Express delivery.',
         MISSING_SHIPPING_PROFILE: 'Some products are missing shipping weight/dimensions. Please contact the seller.',
         RATE_NOT_FOUND: 'No shipping rate configured for this weight yet. Please try a different delivery option.',
-        UNSUPPORTED_WEIGHT: 'Order is too heavy for J&T bag limit (max 8kg). Please split your order or choose another delivery method.',
+        UNSUPPORTED_WEIGHT: 'Order is too heavy for this shipping method. Please split your order or choose another delivery method.',
+        SHIPPING_NOT_SUPPORTED: 'J&T shipping is only available within Oriental Mindoro.',
+        MANUAL_QUOTE_REQUIRED: 'Shipment exceeds 50 kg. Please contact us for a manual quote.',
         VALIDATION_ERROR: 'Invalid shipping details. Please check your address and try again.',
         UNKNOWN: 'Unable to calculate shipping. Please try again or choose a different delivery option.'
       }

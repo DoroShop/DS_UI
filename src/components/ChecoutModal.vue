@@ -245,7 +245,14 @@ const initializeUserData = async () => {
 watch(
   () => props.show,
   async (open) => {
-    if (open) await initializeUserData();
+    if (open) {
+      await initializeUserData();
+      // Auto-select J&T and fetch shipping fee immediately when modal opens
+      selectedDelivery.value = "jnt";
+      if (address.city && address.province) {
+        await calculateJNTShipping();
+      }
+    }
   },
   { immediate: true }
 );
@@ -265,7 +272,7 @@ watch([selectedDelivery, hasFreeShipping, () => address.city, () => address.prov
     shippingFee.value = null;
     shippingStore.clearQuote();
   } else if (delivery === "jnt") {
-    // Only calculate J&T shipping if we have address filled in
+    // Unified J&T shipping — auto-selects bag or rate table based on weight
     if (city && province) {
       await calculateJNTShipping();
     } else {
@@ -303,7 +310,7 @@ const calculateJNTShipping = async () => {
     if (response?.success && shippingStore.hasValidQuote) {
       shippingFee.value = shippingStore.totalShippingFee;
     } else {
-      // Quote failed — surface the error and block checkout (no ₱60 fallback)
+      // Quote failed — surface the error and block checkout
       shippingFee.value = null;
       if (response?.issue) {
         console.warn('Shipping quote issue:', response.issue, response.error);
@@ -515,19 +522,48 @@ const calculateItemsSubtotal = (items: SelectedItem[]) =>
 
 const getShippingFeeForOrder = () => (typeof shippingFee.value === "number" ? shippingFee.value : 0);
 
+/**
+ * Get the shipping fee for a specific vendor from the J&T quote breakdown.
+ * Each shipment in the quote is grouped by seller, so we match by sellerId.
+ * Falls back to equal split if no matching shipment is found.
+ */
+const getVendorShippingFee = (vendorId: string): number => {
+  if (selectedDelivery.value !== "jnt" || !shippingStore.hasValidQuote) {
+    return getShippingFeeForOrder();
+  }
+
+  const shipments = shippingStore.shipments;
+  if (!shipments || shipments.length === 0) {
+    return getShippingFeeForOrder();
+  }
+
+  // Find the shipment matching this vendor/seller
+  const vendorShipment = shipments.find((s: any) => String(s.sellerId) === String(vendorId));
+  if (vendorShipment) {
+    return vendorShipment.fee;
+  }
+
+  // Fallback: if no matching shipment (shouldn't happen), split evenly
+  console.warn(`No shipment found for vendor ${vendorId}, falling back to equal split`);
+  return shippingStore.totalShippingFee / shipments.length;
+};
+
 const buildOrderData = (vendorId: string, items: SelectedItem[]) => {
   const isJnt = selectedDelivery.value === "jnt";
-  // For J&T the backend recomputes the fee server-side; pass 0 so we don't
-  // risk sending a stale or mismatched amount.
-  const fee = isJnt ? 0 : getShippingFeeForOrder();
+  // For J&T, get the per-vendor fee from the quote breakdown so each
+  // seller's order carries only their share of the shipping cost.
+  const fee = isJnt ? getVendorShippingFee(vendorId) : getShippingFeeForOrder();
   const itemsSubtotal = calculateItemsSubtotal(items);
   const subTotal = itemsSubtotal + fee;
+
+  let shippingOption = getShippingOptionLabel(selectedDelivery.value);
+  if (isJnt) shippingOption = "J&T";
 
   return {
     shippingFee: fee,
     shippingAddress: { ...address },
     paymentMethod: selectedPaymentMethod.value,
-    shippingOption: isJnt ? "J&T" : getShippingOptionLabel(selectedDelivery.value),
+    shippingOption,
     agreementDetails: selectedDelivery.value === "agreement" ? customerAgreement.value : "",
     phone: phoneNumber.value,
     name: customerName.value,
@@ -815,7 +851,7 @@ onMounted(async () => {
                   <span v-else-if="selectedDelivery === 'jnt' && shippingStore.quoteError" class="opt-desc error-text">
                     {{ shippingStore.getErrorMessage(shippingStore.quoteError) }}
                   </span>
-                  <span v-else class="opt-desc">Door-to-door delivery</span>
+                  <span v-else class="opt-desc">Door-to-door delivery (up to 50 kg)</span>
                 </div>
                 <span v-if="selectedDelivery === 'jnt' && shippingStore.hasValidQuote" class="opt-price">
                   {{ formatToPHCurrency(shippingStore.totalShippingFee) }}
@@ -838,10 +874,13 @@ onMounted(async () => {
               </div>
             </transition>
 
-            <!-- J&T discount note (only if there's a discount) -->
-            <div v-if="selectedDelivery === 'jnt' && shippingStore.hasValidQuote && shippingStore.totalShippingDiscount > 0" class="discount-note">
-              <span class="discount-badge">Discount Applied</span>
-              <span>You save {{ formatToPHCurrency(shippingStore.totalShippingDiscount) }} on shipping!</span>
+            <!-- J&T shipment breakdown (per-seller) -->
+            <div v-if="selectedDelivery === 'jnt' && shippingStore.hasValidQuote && shippingStore.shipments.length > 0" class="mindoro-breakdown">
+              <div v-for="(shipment, idx) in shippingStore.shipments" :key="idx" class="mindoro-shipment">
+                <span class="mindoro-label">Shipment {{ idx + 1 }}</span>
+                <span class="mindoro-detail">{{ shipment.display }}</span>
+                <span class="mindoro-weight">{{ shipment.tier === 'BAG' ? shipment.bagSpec?.replace(/_/g, ' ') : `${shipment.billKg} kg` }}</span>
+              </div>
             </div>
           </section>
 
@@ -900,10 +939,6 @@ onMounted(async () => {
                 <span v-if="hasFreeShipping" class="free-tag">FREE</span>
                 <span v-else-if="shippingFee === null" class="tbd">To be determined</span>
                 <span v-else>{{ formatToPHCurrency(shippingFee as number) }}</span>
-              </div>
-              <div v-if="shippingStore.totalShippingDiscount > 0 && selectedDelivery === 'jnt'" class="sum-row discount-row">
-                <span>Shipping Discount</span>
-                <span>-{{ formatToPHCurrency(shippingStore.totalShippingDiscount) }}</span>
               </div>
             </div>
             <div class="sum-total">
@@ -1339,9 +1374,46 @@ onMounted(async () => {
   flex-shrink: 0;
 }
 
+/* ─── JNT Mindoro Shipment Breakdown ──────────────────────────────────────── */
+.mindoro-breakdown {
+  margin-top: 0.625rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.mindoro-shipment {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  background: var(--card-bg, --surface, #fff);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--text-secondary, #666);
+}
+
+.mindoro-label {
+  font-weight: 600;
+  color: var(--text-primary, #333);
+  flex-shrink: 0;
+}
+
+.mindoro-detail {
+  flex: 1;
+  font-weight: 500;
+  color: var(--primary-color);
+}
+
+.mindoro-weight {
+  font-size: 0.6875rem;
+  color: var(--text-muted, #999);
+}
+
 /* ─── Order Summary Card ──────────────────────────────────────────────────── */
 .summary-card {
   background: var(--surface, #fff);
+  margin-bottom: 10px;
 }
 
 .summary-rows {

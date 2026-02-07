@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from "vue";
 import axios from "axios";
 import { getAuthHeaders } from "../../types/shared";
+import { Toast } from "../../components/composable/Toast.js";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -67,12 +68,12 @@ const handleFileSelect = (event) => {
 
 const uploadBanners = async () => {
   if (!uploadFiles.value.length) {
-    alert('Please select at least one image');
+    Toast('Please select at least one image', 'error');
     return;
   }
 
   if (!uploadFormData.value.altText) {
-    alert('Alt text is required for accessibility');
+    Toast('Alt text is required for accessibility', 'error');
     return;
   }
 
@@ -98,7 +99,7 @@ const uploadBanners = async () => {
 
     await fetchBanners();
     closeUploadModal();
-    alert('Banners uploaded successfully!');
+    Toast('Banners uploaded successfully!', 'success');
   } catch (err) {
     error.value = err.response?.data?.error || err.message;
   } finally {
@@ -113,7 +114,7 @@ const openEditModal = (banner) => {
 
 const updateBanner = async () => {
   if (!editingBanner.value?.altText) {
-    alert('Alt text is required');
+    Toast('Alt text is required', 'error');
     return;
   }
 
@@ -126,7 +127,7 @@ const updateBanner = async () => {
 
     await fetchBanners();
     closeEditModal();
-    alert('Banner updated successfully!');
+    Toast('Banner updated successfully!', 'success');
   } catch (err) {
     error.value = err.response?.data?.error || err.message;
   } finally {
@@ -194,10 +195,10 @@ const deleteBanner = async (bannerId, bannerTitle) => {
       headers: getAuthHeaders()
     });
     await fetchBanners();
-    alert('Banner deleted successfully!');
+    Toast('Banner deleted successfully!', 'success');
   } catch (err) {
     error.value = err.response?.data?.error || err.message;
-    alert('Failed to delete banner: ' + (err.response?.data?.error || err.message));
+    Toast('Failed to delete banner: ' + (err.response?.data?.error || err.message), 'error');
   } finally {
     busy.value = false;
   }

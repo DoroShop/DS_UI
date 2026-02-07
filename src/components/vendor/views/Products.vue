@@ -1021,7 +1021,7 @@ onMounted(async () => {
 	</div>
 	<Transition name="fade-scale">
 		<div v-if="isAddProducts" class="add-product-form">
-			<AddProduct></AddProduct>
+			<AddProduct @close="isAddProducts = false"></AddProduct>
 			<button class="close-form" @click="isAddingProducts">
 				<XMarkIcon></XMarkIcon>
 			</button>

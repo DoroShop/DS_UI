@@ -533,7 +533,7 @@
 </script>
 
 <template>
-	<div class="seller-shop-page" :class="{ 'dark-mode': isDark }">
+	<section class="seller-shop-page" :class="{ 'dark-mode': isDark }">
 		<!-- Chat Modal -->
 		<ChatModal
 			:isOpen="showChatModal"
@@ -1079,7 +1079,7 @@
 				</div>
 			</div>
 		</transition>
-	</div>
+	</section>
 </template>
 
 <style scoped>
@@ -1088,6 +1088,7 @@
 		background: var(--bg-primary);
 		font-family: "Inter", system-ui, -apple-system, sans-serif;
 		transition: background-color 0.3s ease;
+		margin-bottom: 1rem;
 	}
 
 	.container {
@@ -2297,7 +2298,10 @@
 		}
 	}
 
-	@media (max-width: 768px) {
+	@media (max-width: 840px) {
+		.back-button{
+			display: none;
+		}
 	}
 
 	@media (max-width: 480px) {

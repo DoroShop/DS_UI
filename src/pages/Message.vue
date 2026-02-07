@@ -205,6 +205,7 @@ const chatbotInput = ref('')
 const isTyping = ref(false)
 const showQuickHelp = ref(true)
 const isKeyboardActive = ref(false)
+const keyboardHeight = ref(0)
 
 // Swipe-related state
 const isDragging = ref(false)
@@ -425,39 +426,55 @@ const handleViewportResize = () => {
   }
   
   resizeTimeout = setTimeout(() => {
-    const currentHeight = window.visualViewport?.height || window.innerHeight
+    const vv = window.visualViewport
+    const currentHeight = vv?.height || window.innerHeight
     const heightDifference = initialViewportHeight - currentHeight
     
     // If the viewport height decreased significantly (keyboard appeared)
     if (heightDifference > 150) {
       isKeyboardActive.value = true
+      keyboardHeight.value = heightDifference
+
+      // Set a CSS variable so the input can be positioned above the keyboard
+      document.documentElement.style.setProperty('--keyboard-height', `${heightDifference}px`)
+      
       // Scroll to input when keyboard appears
       nextTick(() => {
         if (chatbotInputRef.value) {
           chatbotInputRef.value.scrollIntoView({ 
             behavior: 'smooth', 
-            block: 'center' 
+            block: 'nearest' 
           })
         }
       })
     } else {
       isKeyboardActive.value = false
+      keyboardHeight.value = 0
+      document.documentElement.style.setProperty('--keyboard-height', '0px')
     }
-  }, 100)
+  }, 50)
 }
 
 const handleInputFocus = () => {
   isKeyboardActive.value = true
   
-  // Delay to ensure keyboard is fully shown
+  // Delay to ensure keyboard is fully shown, then scroll input into view
   setTimeout(() => {
+    const vv = window.visualViewport
+    if (vv) {
+      const heightDiff = initialViewportHeight - vv.height
+      if (heightDiff > 100) {
+        keyboardHeight.value = heightDiff
+        document.documentElement.style.setProperty('--keyboard-height', `${heightDiff}px`)
+      }
+    }
     if (chatbotInputRef.value) {
       chatbotInputRef.value.scrollIntoView({ 
         behavior: 'smooth', 
-        block: 'center' 
+        block: 'nearest' 
       })
     }
-  }, 300)
+  }, 350)
 }
 
 const handleInputBlur = () => {
@@ -465,19 +482,24 @@ const handleInputBlur = () => {
   setTimeout(() => {
     if (!document.activeElement || document.activeElement.tagName !== 'INPUT') {
       isKeyboardActive.value = false
+      keyboardHeight.value = 0
+      document.documentElement.style.setProperty('--keyboard-height', '0px')
     }
-  }, 100)
+  }, 150)
 }
 
 const handleInputTouch = () => {
   // Ensure input is visible on touch devices
   setTimeout(() => {
     if (chatbotInputRef.value) {
+      chatbotInputRef.value.focus()
       chatbotInputRef.value.scrollIntoView({ 
         behavior: 'smooth', 
-        block: 'center' 
+        block: 'nearest' 
       })
     }
+  }, 100)
+}
   }, 100)
 }
 
@@ -755,9 +777,10 @@ onMounted(() => {
   // Store initial viewport height
   initialViewportHeight = window.visualViewport?.height || window.innerHeight
   
-  // Add viewport resize listener
+  // Add viewport resize listener (both resize and scroll for full compatibility)
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', handleViewportResize)
+    window.visualViewport.addEventListener('scroll', handleViewportResize)
   } else {
     window.addEventListener('resize', handleViewportResize)
   }
@@ -771,6 +794,7 @@ onUnmounted(() => {
   // Clean up event listeners
   if (window.visualViewport) {
     window.visualViewport.removeEventListener('resize', handleViewportResize)
+    window.visualViewport.removeEventListener('scroll', handleViewportResize)
   } else {
     window.removeEventListener('resize', handleViewportResize)
   }
@@ -778,6 +802,9 @@ onUnmounted(() => {
   if (resizeTimeout) {
     clearTimeout(resizeTimeout)
   }
+
+  // Clean up CSS variable
+  document.documentElement.style.removeProperty('--keyboard-height')
 })
 </script>
 
@@ -1318,16 +1345,20 @@ onUnmounted(() => {
   border-top: 1px solid #e2e8f0;
   background: white;
   flex-shrink: 0;
-  transition: all 0.3s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
   position: relative;
+  z-index: 100;
 }
 
-/* Keyboard focused state - ensures input stays visible */
+/* Keyboard focused state - ensures input stays visible above keyboard */
 .chatbot-input-container.keyboard-focused {
-  position: sticky;
-  bottom: 0;
-  z-index: 100;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
+  position: fixed;
+  bottom: var(--keyboard-height, 0px);
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.12);
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
 }
 
 .chatbot-form {
@@ -1473,15 +1504,16 @@ onUnmounted(() => {
   /* Enhanced mobile keyboard support */
   .messaging-interface.keyboard-active .chatbot-input-container {
     position: fixed;
-    bottom: 0;
+    bottom: var(--keyboard-height, 0px);
     left: 0;
     right: 0;
     z-index: 1000;
     box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.15);
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   }
 
   .messaging-interface.keyboard-active .chatbot-messages {
-    padding-bottom: 120px; /* Extra space for input */
+    padding-bottom: calc(80px + var(--keyboard-height, 0px)); /* Space for fixed input + keyboard */
   }
 }
 

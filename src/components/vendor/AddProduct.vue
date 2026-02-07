@@ -6,6 +6,14 @@ import ImageCropper from './ImageCropper.vue'
 import { useVendorDashboardStore } from '../../stores/vendor/dashboardStores'
 import { Alert } from '../composable/Alert'
 import { useImageUpload } from '../../composables/useImageUpload'
+import { XMarkIcon } from '@heroicons/vue/24/outline'
+
+/* ================================================================== */
+/* Emits                                                             */
+/* ================================================================== */
+const emit = defineEmits<{
+  close: []
+}>()
 
 /* ------------------------------------------------------------------ */
 /* Constants / Stores                                                 */
@@ -807,9 +815,20 @@ async function cancelProductCreation() {
           <h1 class="page-title">Create Product</h1>
           <p class="page-subtitle">Add a new product to your store</p>
         </div>
-        <div class="location-badge" v-if="vendorMunicipality">
-          <span class="location-icon">📍</span>
-          <span class="location-text">{{ vendorMunicipality }}</span>
+        <div class="header-right">
+          <div class="location-badge" v-if="vendorMunicipality">
+            <span class="location-icon">📍</span>
+            <span class="location-text">{{ vendorMunicipality }}</span>
+          </div>
+          <button 
+            type="button"
+            class="close-btn" 
+            @click="emit('close')"
+            aria-label="Close modal"
+            title="Close"
+          >
+            <XMarkIcon class="close-icon" />
+          </button>
         </div>
       </header>
 
@@ -1390,6 +1409,13 @@ async function cancelProductCreation() {
   margin: 0;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
 .location-badge {
   display: flex;
   align-items: center;
@@ -1405,6 +1431,39 @@ async function cancelProductCreation() {
 
 .location-icon {
   font-size: 0.9rem;
+}
+
+.close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: var(--surface);
+  border: 2px solid var(--border-primary);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+}
+
+.close-btn:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+  transform: scale(1.05);
+}
+
+.close-btn:active {
+  transform: scale(0.95);
+}
+
+.close-icon {
+  width: 20px;
+  height: 20px;
+  stroke-width: 2;
 }
 
 /* Form Layout */
@@ -2459,10 +2518,35 @@ async function cancelProductCreation() {
 
   .page-header {
     flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .header-content {
+    width: 100%;
   }
 
   .page-title {
     font-size: 1.5rem;
+  }
+
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .location-badge {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .close-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .close-icon {
+    width: 18px;
+    height: 18px;
   }
 
   .card-body {

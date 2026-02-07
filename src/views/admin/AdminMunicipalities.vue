@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { useAdminDashboardStore } from '../../stores/admin/adminDashboardStore';
+import { Toast } from '../../components/composable/Toast.js';
 import {
   PlusIcon,
   PencilSquareIcon,
@@ -101,7 +102,7 @@ const resetForm = () => {
 // Submit form
 const submitForm = async () => {
   if (!municipalityForm.value.name.trim()) {
-    alert('Municipality name is required');
+    Toast('Municipality name is required', 'error');
     return;
   }
   
@@ -117,7 +118,7 @@ const submitForm = async () => {
     await fetchMunicipalities();
   } catch (error) {
     console.error('Failed to save municipality:', error);
-    alert('Failed to save municipality. Please try again.');
+    Toast('Failed to save municipality. Please try again.', 'error');
   } finally {
     isSubmitting.value = false;
   }
@@ -134,7 +135,7 @@ const confirmDelete = async () => {
     await fetchMunicipalities();
   } catch (error) {
     console.error('Failed to delete municipality:', error);
-    alert('Failed to delete municipality. Please try again.');
+    Toast('Failed to delete municipality. Please try again.', 'error');
   } finally {
     isSubmitting.value = false;
   }
@@ -149,7 +150,7 @@ const toggleStatus = async (municipality: any) => {
     await fetchMunicipalities();
   } catch (error) {
     console.error('Failed to toggle municipality status:', error);
-    alert('Failed to update municipality status.');
+    Toast('Failed to update municipality status.', 'error');
   }
 };
 

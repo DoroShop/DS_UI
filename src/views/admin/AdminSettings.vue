@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue';
 import { useAdminDashboardStore } from '../../stores/admin/adminDashboardStore';
+import { Toast } from '../../components/composable/Toast.js';
 import {
   Cog6ToothIcon,
   CurrencyDollarIcon,
@@ -135,7 +136,7 @@ const saveSettings = async () => {
     }, 3000);
   } catch (error) {
     console.error('Failed to save settings:', error);
-    alert('Failed to save settings. Please try again.');
+    Toast('Failed to save settings. Please try again.', 'error');
   } finally {
     isSaving.value = false;
   }

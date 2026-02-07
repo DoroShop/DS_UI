@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { ref, onMounted, onBeforeUnmount, nextTick, computed, shallowRef } from 'vue';
 import { useRouter } from 'vue-router';
-import {useAuthStore} from '../stores/authStores';
+import { useAuthStore } from '../stores/authStores';
 import Sidebar from "./Sidebar.vue"
 import Wallet from "./Wallet.vue"
 // import OrderTrackerModal from "./OrderTrackerModal.vue"
@@ -12,16 +12,13 @@ import MagnifyingGlassIcon from '@heroicons/vue/24/outline/MagnifyingGlassIcon';
 import MapPinIcon from '@heroicons/vue/24/outline/MapPinIcon';
 import MoonIcon from '@heroicons/vue/24/outline/MoonIcon';
 import SunIcon from '@heroicons/vue/24/outline/SunIcon';
-import Bars3Icon from '@heroicons/vue/24/outline/Bars3Icon';
-import XMarkIcon from '@heroicons/vue/24/outline/XMarkIcon';
-import TruckIcon from '@heroicons/vue/24/outline/TruckIcon';
 import ChatBubbleLeftIcon from '@heroicons/vue/24/outline/ChatBubbleLeftIcon';
 import { useCartStore } from '../stores/cartStores';
 import { useOrderStore } from '../stores/OrderStores';
 import { useTheme } from '../composables/useTheme';
 
 
-const authStore = useAuthStore();   
+const authStore = useAuthStore();
 
 const userName = authStore.user?.name || 'Guest';
 
@@ -48,10 +45,10 @@ const containerRef = ref(null);
 const openButtonRef = ref(null);
 
 const trackableOrdersCount = computed(() => {
-    return orderStore.orders.filter(order => 
-        order.status === 'shipped' && 
-        order.shippingOption !== 'pickup' && 
-        order.shippingOption !== 'agreement' && 
+    return orderStore.orders.filter(order =>
+        order.status === 'shipped' &&
+        order.shippingOption !== 'pickup' &&
+        order.shippingOption !== 'agreement' &&
         order.shippingOption !== 'customer agreement'
     ).length;
 });
@@ -139,7 +136,7 @@ onMounted(async () => {
             setTimeout(hydrateMessages, 1200);
         }
     }
-}); 
+});
 
 onBeforeUnmount(() => {
     window.removeEventListener('resize', handleResize);
@@ -184,7 +181,7 @@ const goToCart = () => {
 
             <div class="logo-section">
                 <router-link to="/products" class="logo">
-                    <img src="../assets/DoroShop-logo.webp" alt="DoroShop" loading="lazy"/>
+                    <img src="../assets/DoroShop-logo.webp" alt="DoroShop" loading="lazy" />
                     <h3 class="logo-text">DoroShop</h3>
                 </router-link>
             </div>
@@ -199,10 +196,11 @@ const goToCart = () => {
                 </div>
             </div>
 
-       
+
             <div class="actions-section desktop-actions">
                 <div class="action-icons">
-                    <button @click="toggleTheme" class="icon-button theme-toggle" :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'">
+                    <button @click="toggleTheme" class="icon-button theme-toggle"
+                        :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'">
                         <Transition name="theme-icon" mode="out-in">
                             <SunIcon v-if="isDark" key="sun" class="action-icon" />
                             <MoonIcon v-else key="moon" class="action-icon" />
@@ -223,18 +221,26 @@ const goToCart = () => {
                         <ShoppingCartIcon class="action-icon" />
                         <span class="cart-badge">{{ totalItems }}</span>
                     </button>
-                    <NotificationBell />
-             
-                 
+                    <button class="icon-button">
+                        <NotificationBell class="action-icon" />
+                    </button>
+
+
                 </div>
-                <button ref="openButtonRef" v-if="authStore.isAuthenticated" @click="openAccountInfo" class="account-button">
+                <button ref="openButtonRef" v-if="authStore.isAuthenticated" @click="openAccountInfo"
+                    class="account-button">
                     <UserIcon class="account-icon" />
                     <span class="account-text">{{ userName }}</span>
                 </button>
-                  <button ref="openButtonRef" v-else @click="goToLoginPage" class="account-button">
+                <button ref="openButtonRef" v-else @click="goToLoginPage" class="account-button">
                     <UserIcon class="account-icon" />
                     <span class="account-text">Sign in</span>
                 </button>
+            </div>
+
+            <!-- Mobile-only notification bell (visible when desktop-actions is hidden) -->
+            <div class="mobile-notification-bell">
+                <NotificationBell />
             </div>
 
         </div>
@@ -275,6 +281,11 @@ const goToCart = () => {
     min-height: 4rem;
     max-height: 5.5rem;
     position: relative;
+}
+
+/* Mobile Notification Bell - shown only on small screens */
+.mobile-notification-bell {
+    display: none;
 }
 
 /* Logo Section */
@@ -471,12 +482,14 @@ const goToCart = () => {
 }
 
 .account-text {
-  font-size: var(--font-size-sm);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 10ch; /* ~10 characters */
-  display: inline-block; /* needed so max-width applies */
+    font-size: var(--font-size-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 10ch;
+    /* ~10 characters */
+    display: inline-block;
+    /* needed so max-width applies */
 }
 
 
@@ -758,6 +771,13 @@ const goToCart = () => {
 
     .logo-section {
         flex: 1;
+    }
+
+    .mobile-notification-bell {
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+        margin-right: 0.5rem;
     }
 }
 

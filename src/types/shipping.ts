@@ -1,4 +1,4 @@
-// types/shipping.ts — Types for J&T Fixed Shipping module
+// types/shipping.ts — Types for unified J&T shipping module
 
 export interface ShippingQuoteRequest {
   destination: {
@@ -9,59 +9,39 @@ export interface ShippingQuoteRequest {
     productId: string;
     quantity: number;
   }>;
-  serviceType: string;
-  toggles: {
-    itemAdditionalFee: boolean;
-    itemSize: boolean;
-  };
 }
 
-export interface ShippingDiscountBreakdown {
-  productId: string;
-  productName: string;
-  qty: number;
-  shippingDiscountType: string;
-  shippingDiscountValue: number;
-  computedDiscountPhp: number;
-}
-
-export interface ShipmentWeights {
-  actualWeightKg: number;
-  volumetricWeightKg: number;
-  chargeableWeightKg: number;
-  chargeableWeightKgRounded: number;
-  volumetricDivisor: number;
-  roundingStep: number;
-}
-
-export interface ShipmentFees {
-  baseShippingFeePhp: number;
-  totalShippingDiscountPhp: number;
-  finalShippingFeePhp: number;
-}
-
-export interface Shipment {
-  vendorId: string;
+export interface JntShipment {
+  sellerId: string;
   origin: { provinceCode: string; cityCode: string };
-  bagSpecUsed: string;
-  weights: ShipmentWeights;
-  fees: ShipmentFees;
-  discountBreakdown: ShippingDiscountBreakdown[];
+  destination: { provinceCode: string; cityCode: string };
+  actualKg: number;
+  volumetricKg: number;
+  chargeableKg: number;
+  billKg: number;
+  fee: number;
+  tier: 'BAG' | 'RATE_TABLE';
+  bagSpec: string | null;
+  display: string;
+  items: Array<{
+    productId: string;
+    name: string;
+    quantity: number;
+    weightKg: number;
+  }>;
 }
 
-export interface ShippingQuoteSummary {
-  totalBaseShippingFeePhp: number;
-  totalShippingDiscountPhp: number;
-  totalFinalShippingFeePhp: number;
+export interface JntQuoteTotals {
+  shippingFeeTotal: number;
+  billKgTotalNote: string;
 }
 
 export interface ShippingQuoteResponse {
-  courier: string;
-  zone: string;
-  serviceType: string;
+  quoteId: string | null;
+  method: 'JNT_MINDORO';
   destination: { provinceCode: string; cityCode: string };
-  shipments: Shipment[];
-  summary: ShippingQuoteSummary;
+  shipments: JntShipment[];
+  totals: JntQuoteTotals;
   calculatedAt: string;
 }
 
@@ -87,4 +67,7 @@ export type ShippingErrorIssue =
   | 'INVALID_ADDRESS'
   | 'MISSING_SHIPPING_PROFILE'
   | 'RATE_NOT_FOUND'
+  | 'SHIPPING_NOT_SUPPORTED'
+  | 'MANUAL_QUOTE_REQUIRED'
+  | 'VALIDATION_ERROR'
   | 'UNSUPPORTED_WEIGHT';

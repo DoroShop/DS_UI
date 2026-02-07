@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { ArrowLeftIcon } from '@heroicons/vue/24/outline';
+import { ArrowLeftIcon, Bars3Icon, XMarkIcon } from '@heroicons/vue/24/outline';
 import Analytics from '../../components/vendor/views/Analytics.vue';
 import Navigation from '../../components/vendor/Navigation.vue';
 import Products from '../../components/vendor/views/Products.vue';
@@ -36,6 +36,7 @@ onMounted(async () => {
 })
 
 const active = ref(localStorage.getItem("activePageVendorDashboard") || 'Analytics')
+const isMobileMenuOpen = ref(false)
 
 // Check if we're in messages view for layout changes
 const isMessagesView = computed(() => active.value === 'Messages')
@@ -43,6 +44,12 @@ const isMessagesView = computed(() => active.value === 'Messages')
 const sample = (name) => {
   active.value = name
   localStorage.setItem("activePageVendorDashboard", name)
+  // Close mobile menu when item is selected
+  isMobileMenuOpen.value = false
+}
+
+const toggleMobileMenu = () => {
+  isMobileMenuOpen.value = !isMobileMenuOpen.value
 }
 
 onUnmounted(() => {
@@ -70,16 +77,29 @@ onUnmounted(() => {
       <Navigation 
         v-show="!isMessagesView" 
         :active="active"
+        :isMobileMenuOpen="isMobileMenuOpen"
         @navigate="sample"
+        @closeMobileMenu="isMobileMenuOpen = false"
       />
 
       <div class="content" :class="{ 'messages-fullscreen': isMessagesView }">
         <header v-show="!isMessagesView">
           <div class="header-left">
-            <button class="back-button" @click="router.push('/products')" title="Back to Products">
+            <!-- Mobile Hamburger Button -->
+            <button 
+              class="hamburger-btn" 
+              @click="toggleMobileMenu"
+              :class="{ active: isMobileMenuOpen }"
+              aria-label="Toggle navigation menu"
+            >
+              <Bars3Icon class="hamburger-icon" />
+       
+            </button>
+            
+            <!-- <button class="back-button" @click="router.push('/products')" title="Back to Products">
               <ArrowLeftIcon class="back-icon" />
               <span>Back</span>
-            </button>
+            </button> -->
             <h1>{{ active }}</h1>
           </div>
           <div class="header-right">
@@ -239,6 +259,44 @@ header:hover {
   gap: 1rem;
 }
 
+.hamburger-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 2px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: 0.5rem;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow-sm);
+  color: white;
+}
+
+.hamburger-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--color-primary);
+  transform: scale(1.05);
+  box-shadow: var(--shadow-md);
+}
+
+.hamburger-btn.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+
+.hamburger-icon {
+  width: 20px;
+  height: 20px;
+  color: currentColor;
+  transition: transform 0.3s ease;
+}
+
+.hamburger-btn.active .hamburger-icon {
+  transform: rotate(90deg);
+}
+
 .back-button {
   display: flex;
   align-items: center;
@@ -312,6 +370,10 @@ header h1 {
   
   .header-right {
     gap: 0.5rem;
+  }
+  
+  .hamburger-btn {
+    display: flex;
   }
 }
 

@@ -60,11 +60,10 @@ const handleScroll = () => {
 
 const loadProducts = async () => {
   try {
-    // Only fetch if not already fetched (store checks this internally too)
-    if (!productsStore.isFetched) {
-      await productsStore.fetchFeaturedVendor()
-      await productsStore.fetchProducts() // Don't pass true - let store decide
-    }
+    // Force refresh on page load/refresh to trigger randomization
+    await productsStore.fetchFeaturedVendor()
+    await productsStore.fetchProducts(true) // Force refresh to randomize products
+    
     await nextTick()
     if (scrollContainer.value) {
       productsStore.initializeInfiniteScroll(scrollContainer.value)

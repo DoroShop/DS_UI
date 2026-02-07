@@ -562,10 +562,8 @@ const removeVendorItemsFromCart = async (vendorId: string, items: SelectedItem[]
 
 const finalizeCheckoutSuccess = () => {
   clearCheckoutState();
-  // Clear transient override on successful checkout to avoid leaking address across sessions
-  clearCheckoutAddressOverride();
+  // Keep saved shipping info for next checkout — only clear on logout
   Toast("Order(s) placed successfully — check your Orders page for details!", "success", 4000);
-  emit("close");
 };
 
 const finalizeCheckoutFailure = (error: unknown) => {
@@ -577,6 +575,7 @@ const finalizeCheckoutAlways = async () => {
   isSubmitting.value = false;
   cartStore.isFetched = false;
   await cartStore.fetchCart();
+  emit("close");
 };
 
 async function submitOrder() {
@@ -621,7 +620,11 @@ async function submitOrder() {
         continue;
       }
 
-      removeVendorItemsFromCart(vendorId, vendorItems);
+      // Only remove from cart if items actually came from cart (have itemId)
+      const cartItems = vendorItems.filter((item) => item.itemId);
+      if (cartItems.length > 0) {
+        await removeVendorItemsFromCart(vendorId, cartItems);
+      }
     }
 
     finalizeCheckoutSuccess();

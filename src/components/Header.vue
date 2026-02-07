@@ -183,10 +183,10 @@ const goToCart = () => {
             </div>
 
             <div class="logo-section">
-                <div class="logo">
+                <router-link to="/products" class="logo">
                     <img src="../assets/DoroShop-logo.webp" alt="DoroShop" loading="lazy"/>
                     <h3 class="logo-text">DoroShop</h3>
-                </div>
+                </router-link>
             </div>
 
             <div class="desktop-search">
@@ -291,6 +291,14 @@ const goToCart = () => {
     align-items: center;
     gap: 0.5rem;
     height: 100%;
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+}
+
+.logo:hover {
+    opacity: 0.8;
 }
 
 .logo img {

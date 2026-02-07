@@ -2,7 +2,7 @@
 import { ref, computed, defineProps, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { ShoppingCartIcon, StarIcon, MapPinIcon } from '@heroicons/vue/24/solid';
-import { Alert } from './composable/Alert';
+import { Toast } from './composable/Toast';
 import { formatToPHCurrency } from '../utils/currencyFormat';
 import SelectProduct from "./ProductSelectionModal.vue";
 import { useProductsStore } from '../stores/productStores';
@@ -10,6 +10,7 @@ import type { Product } from '../types/product';
 import { useVendorStore } from '../stores/vendorStores';
 import { handleImageError } from '../utils/fallbackImage';
 import { useCartStore } from '../stores/cartStores';
+import { useAuthStore } from '../stores/authStores';
 import { useTheme } from '../composables/useTheme';
 import { isPromotionValid, calculateFinalPrice, hasActualDiscount, getDiscountPercentage } from '../utils/priceCalculator';
 
@@ -18,6 +19,7 @@ const router = useRouter();
 const cartStore = useCartStore();
 const productStore = useProductsStore();
 const vendorStore = useVendorStore();
+const authStore = useAuthStore();
 const { isDark } = useTheme();
 const isOpen = ref(false);
 const selectedProductData = ref<Product | null>(null);
@@ -74,6 +76,13 @@ const updateSelectedProductData = (newProduct: Product) => {
 };
 
 const addProductToCart = async (item: Product) => {
+    // Check if user is authenticated
+    if (!authStore.isAuthenticated) {
+        Toast('Please login to add items to cart', 'warning', 3000);
+        router.push('/login');
+        return;
+    }
+
     if (addingToCart.value === item._id) return;
     addingToCart.value = item._id;
     try {
@@ -91,6 +100,13 @@ const addProductToCart = async (item: Product) => {
 
 // Option selection handler (for SelectProduct modal)
 const handleOptionAddToCart = async (productId: string, optionId: string) => {
+    // Check if user is authenticated
+    if (!authStore.isAuthenticated) {
+        Toast('Please login to add items to cart', 'warning', 3000);
+        router.push('/login');
+        return;
+    }
+
     if (addingOptionToCart.value) return;
     addingOptionToCart.value = true;
     try {

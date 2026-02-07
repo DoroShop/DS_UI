@@ -468,6 +468,12 @@
 			vendorStore.vendorData = {};
 			await vendorStore.fetchSellerInfo(id);
 
+			// Validate that vendor was actually loaded with valid data
+			if (!seller.value?._id) {
+				router.replace({ name: 'NotFound', query: { source: 'seller', id } });
+				return;
+			}
+
 			await vendorStore.fetchVendorProducts(id);
 			await vendorStore.isFollowing();
 			await vendorStore.followerCount();
@@ -478,7 +484,7 @@
 			const message = err?.message || 'Failed to load vendor.';
 			console.error('Failed to load vendor:', err);
 
-			if (status === 404) {
+			if (status === 400 || status === 404 || status === 500) {
 				router.replace({ name: 'NotFound', query: { source: 'seller', id } });
 				return;
 			}
@@ -641,13 +647,13 @@
 						</div>
 
 						<!-- Store Description -->
-						<p class="store-description" v-if="seller?.description">
+						<!-- <p class="store-description" v-if="seller?.description">
 							{{ seller.description }}
 						</p>
 						<p class="store-description" v-else>
 							Welcome to our store! We offer quality products with excellent
 							customer service.
-						</p>
+						</p> -->
 						<div class="action-buttons">
 							<button
 								class="action-btn follow-btn"

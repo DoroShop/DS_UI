@@ -281,7 +281,7 @@ const restoreCheckoutModal = () => {
     min-height: 100dvh;
     max-height: 100dvh;
     overflow: auto;
-    padding-bottom: 120px;
+    padding-bottom: 140px;
     /* Space for sticky checkout */
     transition: background-color var(--transition-fast);
 }

@@ -13,12 +13,13 @@ import {
   CheckBadgeIcon,
   MinusIcon,
   PlusIcon,
+  XMarkIcon,
 } from "@heroicons/vue/24/outline";
 import { StarIcon, HeartIcon } from "@heroicons/vue/24/solid";
 import { ProductOption } from "../types/product";
 import MiniHeader from "../components/MiniHeader.vue";
 import CheckoutModal from "../components/ChecoutModal.vue";
-import { Alert } from "../components/composable/Alert"
+import { Toast } from "../components/composable/Toast"
 import { useProductsStore } from "../stores/productStores"
 import { useReviewStore } from "../stores/reviewStore"
 import { useAuthStore } from "../stores/authStores"
@@ -299,6 +300,13 @@ watch(quantity, (newVal) => {
 });
 
 const addToCart = async () => {
+  // Check if user is authenticated
+  if (!authStore.isAuthenticated) {
+    Toast('Please login to add items to cart', 'warning', 3000);
+    router.push('/login');
+    return;
+  }
+
   if (product?.value?.option.length <= 0) {
     await productStore.addToCart(product.value?._id, product.value?._id, quantity.value);
     return;
@@ -378,6 +386,13 @@ const loadProductData = async (id: string) => {
     currentImageIndex.value = 0;
 
     await productStore.fetchProductsById(id);
+
+    // Validate that product was actually loaded with valid data
+    if (!product.value?._id) {
+      router.replace({ name: 'NotFound', query: { source: 'product', id } });
+      return;
+    }
+
     isLoading.value = false;
 
     productStore.fetchRelatedProducts(id).catch(err => {
@@ -406,7 +421,7 @@ const loadProductData = async (id: string) => {
     const message = error?.message || 'Failed to load product.';
     console.error('Failed to load product:', error);
 
-    if (status === 404) {
+    if (status === 400 || status === 404 || status === 500) {
       router.replace({ name: 'NotFound', query: { source: 'product', id } });
       return;
     }
@@ -569,6 +584,13 @@ const closeOptionsModal = () => {
 };
 
 const confirmAddToCart = async () => {
+  // Check if user is authenticated
+  if (!authStore.isAuthenticated) {
+    Toast('Please login to add items to cart', 'warning', 3000);
+    router.push('/login');
+    return;
+  }
+
   if (!selectedOption.value) return;
 
   await productStore.addToCart(selectedOption.value._id, productStore.productId, quantity.value);
@@ -689,7 +711,7 @@ const buyNow = async () => {
     // Check if product is loaded
     if (!product.value) {
       console.error('❌ Product not loaded yet');
-      Alert('Product not loaded. Please try again.', 'error');
+      Toast('Product not loaded. Please try again.', 'error', 3000);
       return;
     }
     
@@ -699,7 +721,7 @@ const buyNow = async () => {
     
   } catch (error) {
     console.error('❌ Buy Now error:', error);
-    Alert('Something went wrong. Please try again.', 'error');
+    Toast('Something went wrong. Please try again.', 'error', 3000);
   } finally {
     isBuyNowLoading.value = false;
   }
@@ -910,13 +932,13 @@ const getUserAvatar = (user: any) => {
                 <MapPinIcon class="meta-icon" />
                 <span>{{ product.municipality || 'Oriental Mindoro' }}</span>
               </div>
-              <div class="meta-item">
+              <!-- <div class="meta-item">
                 <TruckIcon class="meta-icon" />
                 <span>Free Shipping Available</span>
-              </div>
+              </div> -->
               <div class="meta-item">
                 <ShieldCheckIcon class="meta-icon" />
-                <span>Buyer Protection</span>
+                <span>Authentic</span>  
               </div>
             </div>
 
@@ -1184,75 +1206,90 @@ const getUserAvatar = (user: any) => {
   </div>
   
   <!-- Quantity Selection Modal for Buy Now -->
-  <div v-if="showQuantityModal" class="modal-overlay" @click="cancelQuantitySelection">
-    <div class="quantity-modal" @click.stop>
-      <div class="modal-header">
-        <div>
-          <h3>Select Quantity</h3>
-          <p class="modal-subtitle">Confirm your order details</p>
-        </div>
-        <button @click="cancelQuantitySelection" class="close-btn" aria-label="Close modal">✕</button>
-      </div>
-      
-      <div class="modal-body">
-        <!-- Product Information Card -->
-        <div class="product-info">
-          <img :src="selectedImage || (product?.images?.[0]?.url) || ''" 
-               :alt="product?.name || 'Product'" 
-               class="product-image"
-               @error="handleImageError" />
-          <div class="product-details">
-            <h4>{{ product?.name }}</h4>
-            <div class="price-stock">
-              <p class="product-price">{{ formatToPHCurrency(currentPrice) }}</p>
-              <p class="stock-info">{{ currentStock }} in stock</p>
+  <Teleport to="body">
+    <Transition name="modal-fade">
+      <div v-if="showQuantityModal" class="modal-overlay" @click="cancelQuantitySelection">
+        <Transition name="modal-slide">
+          <div class="quantity-modal" @click.stop v-if="showQuantityModal">
+            <div class="modal-header">
+              <div class="modal-header-text">
+                <h3>Buy Now</h3>
+                <p class="modal-subtitle">Review your item before checkout</p>
+              </div>
+              <button @click="cancelQuantitySelection" class="close-btn" aria-label="Close modal">
+                <XMarkIcon class="close-icon" />
+              </button>
+            </div>
+            
+            <div class="modal-body">
+              <!-- Product Information Card -->
+              <div class="product-info-card">
+                <div class="product-image-wrapper">
+                  <img :src="selectedImage || (product?.images?.[0]?.url) || ''" 
+                       :alt="product?.name || 'Product'" 
+                       class="product-image"
+                       @error="handleImageError" />
+                </div>
+                <div class="product-details">
+                  <h4>{{ product?.name }}</h4>
+                  <p v-if="selectedOption" class="selected-variant">{{ selectedOption.label }}</p>
+                  <div class="price-stock">
+                    <p class="product-price">{{ formatToPHCurrency(currentPrice) }}</p>
+                    <span class="stock-badge" :class="{ 'low-stock': currentStock <= 5 }">
+                      {{ currentStock <= 5 ? `Only ${currentStock} left` : `${currentStock} in stock` }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Quantity Selection -->
+              <div class="quantity-selector">
+                <label for="quantity">Quantity</label>
+                <div class="quantity-controls">
+                  <button @click="decrementBuyNowQuantity" 
+                          :disabled="buyNowQuantity <= 1" 
+                          class="qty-btn"
+                          aria-label="Decrease quantity">
+                    <MinusIcon class="qty-icon" />
+                  </button>
+                  <span class="qty-display" id="quantity">{{ buyNowQuantity }}</span>
+                  <button @click="incrementBuyNowQuantity" 
+                          :disabled="buyNowQuantity >= currentStock" 
+                          class="qty-btn"
+                          aria-label="Increase quantity">
+                    <PlusIcon class="qty-icon" />
+                  </button>
+                </div>
+              </div>
+              
+              <!-- Order Summary -->
+              <div class="order-summary">
+                <div class="summary-row">
+                  <span>Subtotal</span>
+                  <span class="summary-value">{{ formatToPHCurrency(currentPrice * buyNowQuantity) }}</span>
+                </div>
+                <div class="summary-row total-row">
+                  <span>Estimated Total</span>
+                  <strong class="total-value">{{ formatToPHCurrency(currentPrice * buyNowQuantity) }}</strong>
+                </div>
+                <p class="shipping-note">Shipping will be calculated at checkout</p>
+              </div>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="modal-footer">
+              <button @click="cancelQuantitySelection" class="btn btn-cancel">Cancel</button>
+              <button @click="confirmBuyNow" 
+                      :disabled="buyNowQuantity === 0 || buyNowQuantity > currentStock" 
+                      class="btn btn-checkout">
+                Proceed to Checkout
+              </button>
             </div>
           </div>
-        </div>
-        
-        <!-- Quantity Selection -->
-        <div class="quantity-selector">
-          <label for="quantity">QUANTITY</label>
-          <div class="quantity-controls">
-            <button @click="decrementBuyNowQuantity" 
-                    :disabled="buyNowQuantity <= 1" 
-                    class="qty-btn"
-                    aria-label="Decrease quantity">
-              <MinusIcon class="qty-icon" />
-            </button>
-            <span class="qty-display" id="quantity">{{ buyNowQuantity }}</span>
-            <button @click="incrementBuyNowQuantity" 
-                    :disabled="buyNowQuantity >= currentStock" 
-                    class="qty-btn"
-                    aria-label="Increase quantity">
-              <PlusIcon class="qty-icon" />
-            </button>
-          </div>
-        </div>
-        
-        <!-- Order Summary -->
-        <div class="order-summary">
-          <div class="summary-row">
-            <span>Subtotal ({{ buyNowQuantity }} item{{ buyNowQuantity !== 1 ? 's' : '' }})</span>
-            <strong>{{ formatToPHCurrency(currentPrice * buyNowQuantity) }}</strong>
-          </div>
-          <p class="shipping-note">🚚 Shipping calculated at checkout</p>
-        </div>
+        </Transition>
       </div>
-      
-      <!-- Action Buttons -->
-      <div class="modal-footer">
-        <button @click="cancelQuantitySelection" class="btn btn-secondary">Cancel</button>
-        <button @click="confirmBuyNow" 
-                :disabled="buyNowQuantity === 0 || buyNowQuantity > currentStock" 
-                class="btn btn-primary">
-          Proceed to Checkout
-        </button>
-      </div>
-      
-      <p class="delivery-note">💡 You can review and update delivery details at checkout</p>
-    </div>
-  </div>
+    </Transition>
+  </Teleport>
 
   <!-- Checkout Modal for Buy Now -->
   <CheckoutModal
@@ -3834,22 +3871,34 @@ const getUserAvatar = (user: any) => {
 /* Quantity Modal Styles - Premium Design */
 .quantity-modal {
   background: var(--bg-primary);
-  border-radius: 12px;
-  max-width: 450px;
+  border-radius: 16px;
+  max-width: 420px;
   width: 90%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.2);
   overflow: hidden;
   border: 1px solid var(--border-color);
+  animation: modalSlideUp 0.3s ease-out;
+}
+
+@keyframes modalSlideUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .quantity-modal .modal-header {
-  padding: 28px 28px 20px 28px;
+  padding: 24px 24px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   border-bottom: 1px solid var(--border-color);
-  position: relative;
+}
+
+.quantity-modal .modal-header-text {
+  flex: 1;
 }
 
 .quantity-modal .modal-header h3 {
-  margin: 0 0 6px 0;
+  margin: 0 0 4px 0;
   font-size: 20px;
   font-weight: 700;
   color: var(--text-primary);
@@ -3866,7 +3915,6 @@ const getUserAvatar = (user: any) => {
 .quantity-modal .close-btn {
   background: var(--surface);
   border: none;
-  font-size: 20px;
   color: var(--text-secondary);
   cursor: pointer;
   padding: 6px;
@@ -3875,11 +3923,14 @@ const getUserAvatar = (user: any) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  position: absolute;
-  top: 20px;
-  right: 20px;
   border-radius: 8px;
   transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.quantity-modal .close-btn .close-icon {
+  width: 18px;
+  height: 18px;
 }
 
 .quantity-modal .close-btn:hover {
@@ -3888,27 +3939,33 @@ const getUserAvatar = (user: any) => {
 }
 
 .quantity-modal .modal-body {
-  padding: 28px;
+  padding: 24px;
 }
 
-/* Product Info - Enhanced Presentation */
-.quantity-modal .product-info {
+/* Product Info Card */
+.quantity-modal .product-info-card {
   display: flex;
-  gap: 18px;
-  margin-bottom: 28px;
-  padding: 16px;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 14px;
   background: var(--surface);
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid var(--border-color);
 }
 
-.quantity-modal .product-image {
+.quantity-modal .product-image-wrapper {
   width: 80px;
   height: 80px;
-  object-fit: cover;
-  border-radius: 8px;
+  border-radius: 10px;
+  overflow: hidden;
   flex-shrink: 0;
   border: 1px solid var(--border-color);
+}
+
+.quantity-modal .product-image-wrapper img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .quantity-modal .product-details {
@@ -3916,24 +3973,38 @@ const getUserAvatar = (user: any) => {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .quantity-modal .product-details h4 {
-  margin: 0 0 10px 0;
-  font-size: 16px;
+  margin: 0;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
-  line-height: 1.4;
+  line-height: 1.35;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
+.quantity-modal .selected-variant {
+  margin: 0;
+  font-size: 12px;
+  color: var(--primary-color);
+  font-weight: 500;
+  background: rgba(9, 74, 37, 0.08);
+  padding: 2px 8px;
+  border-radius: 4px;
+  width: fit-content;
+}
+
 .quantity-modal .price-stock {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .quantity-modal .product-price {
@@ -3943,28 +4014,32 @@ const getUserAvatar = (user: any) => {
   color: var(--primary-color);
 }
 
-.quantity-modal .stock-info {
-  margin: 0;
-  font-size: 13px;
+.quantity-modal .stock-badge {
+  font-size: 11px;
   color: var(--text-secondary);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  background: var(--bg-secondary);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
 }
 
-/* Quantity Section - Modern Controls */
+.quantity-modal .stock-badge.low-stock {
+  color: #e65100;
+  background: rgba(230, 81, 0, 0.08);
+}
+
+/* Quantity Section */
 .quantity-modal .quantity-selector {
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 .quantity-modal .quantity-selector label {
   display: block;
-  margin-bottom: 14px;
-  font-size: 12px;
-  font-weight: 700;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-primary);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.3px;
 }
 
 .quantity-modal .quantity-controls {
@@ -3973,7 +4048,7 @@ const getUserAvatar = (user: any) => {
   gap: 0;
   width: fit-content;
   border: 2px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
   background: var(--surface);
 }
@@ -3988,8 +4063,6 @@ const getUserAvatar = (user: any) => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 20px;
-  font-weight: 500;
   transition: all 0.2s ease;
 }
 
@@ -3999,8 +4072,8 @@ const getUserAvatar = (user: any) => {
 }
 
 .quantity-modal .qty-icon {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   stroke-width: 2.5;
 }
 
@@ -4023,214 +4096,157 @@ const getUserAvatar = (user: any) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--text-primary);
   background: var(--surface);
 }
 
-/* Order Summary - Professional Layout */
+/* Order Summary */
 .quantity-modal .order-summary {
-  border-top: 2px solid var(--border-color);
-  border-bottom: 2px solid var(--border-color);
-  padding: 20px 0;
-  margin-bottom: 24px;
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
 }
 
 .quantity-modal .summary-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
-  padding: 0 0;
-}
-
-.quantity-modal .summary-row:last-child {
-  margin-bottom: 0;
+  padding: 6px 0;
 }
 
 .quantity-modal .summary-row span {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-secondary);
   font-weight: 500;
 }
 
-.quantity-modal .summary-row strong {
-  font-size: 14px;
+.quantity-modal .summary-value {
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-/* Final Summary Row - Highlighted */
-.quantity-modal .summary-row:nth-child(2) span {
-  font-weight: 700;
-  color: var(--text-primary);
+.quantity-modal .total-row {
+  border-top: 1px dashed var(--border-color);
+  margin-top: 8px;
+  padding-top: 12px;
 }
 
-.quantity-modal .summary-row:nth-child(2) strong {
+.quantity-modal .total-row span {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.quantity-modal .total-value {
   font-size: 18px;
   color: var(--primary-color);
 }
 
 .quantity-modal .shipping-note {
-  margin: 0;
-  font-size: 12px;
+  margin: 10px 0 0;
+  font-size: 11px;
   color: var(--text-secondary);
   text-align: center;
-  line-height: 1.5;
+  opacity: 0.8;
 }
 
-/* Action Buttons - Modern Style */
+/* Action Buttons */
 .quantity-modal .modal-footer {
   display: flex;
-  gap: 12px;
-  padding: 20px 28px 0 28px;
+  gap: 10px;
+  padding: 16px 24px 24px;
 }
 
 .quantity-modal .btn {
   flex: 1;
-  padding: 12px 20px;
-  border-radius: 8px;
+  padding: 13px 20px;
+  border-radius: 10px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   border: none;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   text-align: center;
-  text-transform: capitalize;
-  letter-spacing: 0.3px;
 }
 
-.quantity-modal .btn-secondary {
+.quantity-modal .btn-cancel {
   background: var(--surface);
   color: var(--text-primary);
-  border: 2px solid var(--border-color);
+  border: 1.5px solid var(--border-color);
 }
 
-.quantity-modal .btn-secondary:hover {
+.quantity-modal .btn-cancel:hover {
   background: var(--border-color);
-  border-color: var(--border-color);
 }
 
-.quantity-modal .btn-primary {
+.quantity-modal .btn-checkout {
   background: var(--primary-color);
   color: white;
-  border: 2px solid var(--primary-color);
 }
 
-.quantity-modal .btn-primary:hover:not(:disabled) {
-  background: #15922f;
-  border-color: #15922f;
-  box-shadow: 0 8px 16px rgba(34, 197, 94, 0.3);
-  transform: translateY(-2px);
+.quantity-modal .btn-checkout:hover:not(:disabled) {
+  filter: brightness(1.1);
+  box-shadow: 0 6px 20px rgba(34, 197, 94, 0.3);
+  transform: translateY(-1px);
 }
 
-.quantity-modal .btn-primary:active:not(:disabled) {
+.quantity-modal .btn-checkout:active:not(:disabled) {
   transform: translateY(0);
 }
 
-.quantity-modal .btn-primary:disabled {
+.quantity-modal .btn-checkout:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.quantity-modal .delivery-note {
-  margin: 0;
-  padding: 12px 28px 20px 28px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  text-align: center;
-  line-height: 1.5;
+/* Transition classes */
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity 0.25s ease;
 }
 
-/* Dark mode support */
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
+}
+
+.modal-slide-enter-active {
+  transition: all 0.3s ease-out;
+}
+
+.modal-slide-leave-active {
+  transition: all 0.2s ease-in;
+}
+
+.modal-slide-enter-from {
+  opacity: 0;
+  transform: translateY(20px) scale(0.97);
+}
+
+.modal-slide-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+}
+
+/* Dark mode */
 .theme-dark .quantity-modal {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-}
-
-.theme-dark .quantity-modal .modal-header {
-  border-bottom-color: var(--border-color);
-}
-
-.theme-dark .quantity-modal .modal-header h3 {
-  color: var(--text-primary);
-}
-
-.theme-dark .quantity-modal .close-btn {
-  background: var(--surface);
-  color: var(--text-secondary);
-}
-
-.theme-dark .quantity-modal .close-btn:hover {
-  background: var(--border-color);
-  color: var(--text-primary);
-}
-
-.theme-dark .quantity-modal .product-info {
-  background: var(--surface);
-  border-color: var(--border-color);
-}
-
-.theme-dark .quantity-modal .product-image {
-  border-color: var(--border-color);
-}
-
-.theme-dark .quantity-modal .product-details h4 {
-  color: var(--text-primary);
-}
-
-.theme-dark .quantity-modal .stock-info {
-  color: var(--text-secondary);
-}
-
-.theme-dark .quantity-modal .quantity-controls {
-  border-color: var(--border-color);
-  background: var(--surface);
-}
-
-.theme-dark .quantity-modal .qty-btn {
-  background: var(--surface);
-  color: var(--text-primary);
-  border-color: var(--border-color);
-}
-
-.theme-dark .quantity-modal .qty-btn:hover:not(:disabled) {
-  background: var(--primary-color);
-  color: white;
-}
-
-.theme-dark .quantity-modal .qty-display {
-  background: var(--surface);
-  color: var(--text-primary);
-}
-
-.theme-dark .quantity-modal .order-summary {
-  border-color: var(--border-color);
-}
-
-.theme-dark .quantity-modal .btn-secondary {
-  background: var(--surface);
-  color: var(--text-primary);
-  border-color: var(--border-color);
-}
-
-.theme-dark .quantity-modal .btn-secondary:hover {
-  background: var(--border-color);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
 }
 
 /* Mobile responsiveness */
 @media (max-width: 640px) {
   .quantity-modal {
-    margin: 16px;
     width: calc(100% - 32px);
     max-width: none;
-    border-radius: 12px;
+    margin: 16px;
   }
   
   .quantity-modal .modal-header {
-    padding: 20px 20px 16px 20px;
+    padding: 20px 20px 16px;
   }
   
   .quantity-modal .modal-header h3 {
@@ -4242,21 +4258,15 @@ const getUserAvatar = (user: any) => {
   }
   
   .quantity-modal .modal-footer {
-    padding: 16px 20px 0 20px;
-    gap: 10px;
+    padding: 12px 20px 20px;
   }
   
   .quantity-modal .btn {
-    padding: 11px 16px;
+    padding: 12px 16px;
     font-size: 13px;
   }
   
-  .quantity-modal .product-info {
-    gap: 12px;
-    padding: 12px;
-  }
-  
-  .quantity-modal .product-image {
+  .quantity-modal .product-image-wrapper {
     width: 70px;
     height: 70px;
   }
@@ -4267,16 +4277,6 @@ const getUserAvatar = (user: any) => {
   
   .quantity-modal .product-price {
     font-size: 16px;
-  }
-  
-  .quantity-modal .order-summary {
-    padding: 16px 0;
-    margin-bottom: 20px;
-  }
-  
-  .quantity-modal .delivery-note {
-    padding: 10px 20px 16px 20px;
-    font-size: 11px;
   }
 }
 

@@ -6,9 +6,11 @@ import {
 } from "@heroicons/vue/24/outline";
 import { useRouter } from "vue-router";
 import { useTheme } from "../composables/useTheme";
+import { useCartStore } from "../stores/cartStores";
 
 const router = useRouter();
 const { isDark } = useTheme();
+const cartStore = useCartStore();
 
 const goBack = () => {
   router.back();
@@ -41,13 +43,12 @@ const goToCart = () => {
           </div>
         </div>
       </div>
-
-      <div class="header-right">
+      <!-- <div class="header-right">
         <button @click="goToCart" class="header-cart-btn">
           <ShoppingCartIcon class="icon" />
-          <span class="cart-badge">{{ 1 + 1 }}</span>
+          <span v-if="cartStore.countItem > 0" class="cart-badge">{{ cartStore.countItem }}</span>
         </button>
-      </div>
+      </div> -->
     </div>
   </header>
 </template>

@@ -6,6 +6,7 @@ import { getAuthHeaders } from "../types/shared";
 import { Toast } from "../components/composable/Toast.js";
 import { refreshCartPricing } from "../utils/cartSync.js";
 import { calculateFinalPrice } from "../utils/priceCalculator";
+import { shuffleArray } from "../utils/arrayUtils";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -71,6 +72,11 @@ export const useProductsStore = defineStore("products", {
     isFetched: false,
     vendorIsFetched: false,
 
+    // Separate search pagination state (avoids conflicts with fetchProducts)
+    searchSkip: 0,
+    searchHasMore: true,
+    isSearchLoading: false,
+
     homeScrollPosition: 0,
     isRestoringScroll: false,
   }),
@@ -111,33 +117,39 @@ export const useProductsStore = defineStore("products", {
       this.isFetched = false;
     },
 
-    async fetchSearchProducts(query: string, reset: boolean): Promise<void> {
-      if (this.isLoading || !this.hasMore) return;
+    shuffleProducts() {
+      this.products = shuffleArray(this.products);
+      this.featuredProducts = shuffleArray(this.featuredProducts);
+    },
 
+    async fetchSearchProducts(query: string, reset: boolean): Promise<void> {
       if (reset) {
         this.searchResultProducts = [];
-        this.skip = 0;
-        this.hasMore = true;
+        this.searchSkip = 0;
+        this.searchHasMore = true;
+        this.isSearchLoading = false;
       }
 
-      this.isLoading = true;
+      if (this.isSearchLoading || !this.searchHasMore) return;
+
+      this.isSearchLoading = true;
       this.error = null;
 
       try {
         const response = await axios.get(`${API_BASE_URL}/products/search`, {
-          params: { limit: this.limit, skip: this.skip, q: query },
+          params: { limit: this.limit, skip: this.searchSkip, q: query },
         });
 
         let fetched: Product[] = Array.isArray(response.data) ? response.data : [];
         fetched = filterInStockOptions(fetched);
 
-        if (fetched.length < this.limit) this.hasMore = false;
+        if (fetched.length < this.limit) this.searchHasMore = false;
         this.searchResultProducts.push(...fetched);
-        this.skip += this.limit;
+        this.searchSkip += this.limit;
       } catch (err: any) {
         this.error = err?.response?.data?.message || "Failed to fetch products.";
       } finally {
-        this.isLoading = false;
+        this.isSearchLoading = false;
       }
     },
 
@@ -160,11 +172,14 @@ export const useProductsStore = defineStore("products", {
 
         if (this.skip === 0) {
           await this._loadFeaturedSubscribed(fetched);
+          // Randomize products on initial load or refresh
+          this.products.push(...fetched);
+          this.shuffleProducts();
+        } else {
+          this.products.push(...fetched);
         }
 
         if (fetched.length < this.limit) this.hasMore = false;
-
-        this.products.push(...fetched);
         this.skip += this.limit;
         this.isFetched = true;
       } catch (err: any) {
@@ -276,7 +291,12 @@ export const useProductsStore = defineStore("products", {
         this.productById = fetched;
         this.productId = (fetched as any)?._id;
       } catch (err: any) {
-        this.error = err?.response?.data?.message || "Failed to fetch product.";
+        const status = err?.response?.status || err?.status;
+        const message = err?.response?.data?.message || err?.message || "Failed to fetch product.";
+        this.error = message;
+        this.isLoading = false;
+        // Re-throw the error so components can handle 404s and other errors
+        throw { status, message, response: err?.response };
       } finally {
         this.isLoading = false;
       }

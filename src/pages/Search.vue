@@ -22,6 +22,19 @@ const selectedIndex = ref(-1);
 const searchInput = ref(null);
 const showSearchResults = ref(false);
 
+// Shop suggestions filtered client-side from cached featured vendors
+const shopSuggestions = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  if (!q) return [];
+  return productStore.featuredSeller.filter((shop) =>
+    shop.storeName?.toLowerCase().includes(q)
+  );
+});
+
+const selectShop = (shop) => {
+  router.push(`/view/vendor/${shop.userId}`);
+};
+
 // Load trending products when component mounts
 const loadTrendingProducts = async () => {
   try {
@@ -160,6 +173,8 @@ onMounted(() => {
   // Focus search input on mount
   searchInput.value?.focus();
   loadTrendingProducts();
+  // Pre-load featured vendors for shop search (cached, only fetches once)
+  productStore.fetchFeaturedVendor();
 });
 
 onUnmounted(() => {
@@ -197,7 +212,7 @@ onUnmounted(() => {
           </div>
 
           <!-- Suggestions dropdown -->
-          <div v-if="suggestions.length > 0 || trendingProducts.length > 0" class="suggestions-dropdown"
+          <div v-if="suggestions.length > 0 || trendingProducts.length > 0 || shopSuggestions.length > 0" class="suggestions-dropdown"
             @mousedown.prevent>
             <!-- Search suggestions -->
             <div v-if="searchQuery && suggestions.length > 0" class="suggestions-section">
@@ -245,8 +260,33 @@ onUnmounted(() => {
               </div>
             </div>
 
+            <!-- Shop suggestions when searching -->
+            <div v-if="searchQuery && shopSuggestions.length > 0" class="suggestions-section">
+              <div class="section-header">
+                <h4>Shops</h4>
+              </div>
+              <div v-for="shop in shopSuggestions" :key="`shop-${shop.userId}`"
+                class="suggestion-item shop-suggestion-item" @click="selectShop(shop)">
+                <div class="product-image shop-avatar">
+                  <img :src="shop.imageUrl ||
+                    'https://images.pexels.com/photos/90946/pexels-photo-90946.jpeg?auto=compress&cs=tinysrgb&w=400'
+                    " :alt="shop.storeName" @error="handleImageError" />
+                </div>
+                <div class="product-info">
+                  <h4 class="product-name">{{ shop.storeName }}</h4>
+                  <p v-if="shop.totalProducts" class="product-category">
+                    {{ shop.totalProducts }} products
+                  </p>
+                  <div v-if="shop.rating" class="shop-rating">
+                    <span class="rating-star">★</span>
+                    <span class="rating-value">{{ shop.rating.toFixed(1) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- No results message for search -->
-            <div v-if="searchQuery && !productStore.isLoading && suggestions.length === 0" class="no-results">
+            <div v-if="searchQuery && !productStore.isLoading && suggestions.length === 0 && shopSuggestions.length === 0" class="no-results">
               <p>No products found for "{{ searchQuery }}"</p>
             </div>
           </div>
@@ -990,5 +1030,27 @@ onUnmounted(() => {
   mask: radial-gradient(farthest-side,
       transparent calc(100% - 2px),
       black calc(100% - 2px));
+}
+
+/* Shop suggestion styles */
+.shop-avatar img {
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.shop-rating {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.shop-rating .rating-star {
+  color: #f59e0b;
+}
+
+.shop-rating .rating-value {
+  font-weight: 500;
 }
 </style>

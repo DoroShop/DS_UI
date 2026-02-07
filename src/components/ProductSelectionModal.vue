@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { ref, defineProps, watch, defineEmits, nextTick, computed } from "vue";
-import { Alert } from "./composable/Alert.js";
+import { useRouter } from 'vue-router';
+import { Toast } from "./composable/Toast";
 import { XMarkIcon } from '@heroicons/vue/24/solid';
 import type { ProductOption, SelectedItems } from '../types/product';
 import { useProductsStore } from "../stores/productStores";
 import { useCartStore } from "../stores/cartStores";
+import { useAuthStore } from "../stores/authStores";
 import { useTheme } from "../composables/useTheme";
 
+const router = useRouter();
 const productStore = useProductsStore()
 const cartStore = useCartStore()
+const authStore = useAuthStore()
 const { isDark } = useTheme()
 const props = defineProps<{
   isOpen: boolean;
@@ -95,8 +99,16 @@ const handleOptionChange = (option: ProductOption) => {
 const localLoading = ref(false);
 
 const addToCart = async () => {
+  // Check if user is authenticated
+  if (!authStore.isAuthenticated) {
+    Toast('Please login to add items to cart', 'warning', 3000);
+    closeModal();
+    router.push('/login');
+    return;
+  }
+
   if (!selectedOptionId.value) {
-    Alert("Please select a product option first.", "warning", "#c56c00");
+    Toast("Please select a product option first.", "warning", 3000);
     return;
   }
   localLoading.value = true;

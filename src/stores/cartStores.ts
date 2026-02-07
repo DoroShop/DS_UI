@@ -395,41 +395,24 @@ export const useCartStore = defineStore("cart", {
       }, 300);
     },
 
-    async updateCartItemQuantity(productId, optionId, delta) {
-      // Treat `delta` as change (can be positive or negative)
+    async updateCartItemQuantity(productId, optionId, delta, shopId?) {
+      // `delta` is the accumulated change to send to the server.
+      // The local quantity was ALREADY updated optimistically by updateLocalItem().
       if (!delta || delta === 0) return;
 
       let itemRef = null;
       for (const shop of this.cartData.shops) {
-        itemRef = shop.items?.find((i) => i.productId === productId && i.optionId === optionId) || itemRef;
+        itemRef = shop.items?.find((i) => i.productId === productId && i.optionId === optionId) || null;
         if (itemRef) break;
       }
 
-      const previousQuantity = itemRef?.quantity ?? null;
-      const newQuantity = (itemRef?.quantity || 0) + delta;
-      const allowedMax = Math.min(itemRef?.stock ?? Infinity, MAX_CART_QUANTITY);
-
-      // If newQuantity would be less than 1, revert and skip server call
-      if (newQuantity < 1) {
-        if (itemRef && previousQuantity !== null) {
-          itemRef.quantity = previousQuantity;
-        }
-        console.warn('Attempted to set quantity below 1; action ignored');
-        return;
-      }
-
-      // Compute the actual delta we'll send after clamping to allowed max
-      let sendDelta = delta;
-      if (newQuantity > allowedMax) {
-        sendDelta = allowedMax - (previousQuantity ?? 0);
-        if (itemRef) itemRef.quantity = allowedMax;
-        console.warn(`Requested delta ${delta} exceeds allowed max; clamped to delta ${sendDelta}`);
-      }
-
-      if (sendDelta === 0) return; // Nothing to send after clamping
+      // The current quantity is already the optimistically updated value.
+      // The "previous" server-synced quantity is current minus the delta we're about to send.
+      const currentQuantity = itemRef?.quantity ?? 0;
+      const previousQuantity = currentQuantity - delta;
 
       try {
-        const payload = { item: this.sanitizeDeltaForServer(productId, optionId, sendDelta) };
+        const payload = { item: this.sanitizeDeltaForServer(productId, optionId, delta) };
         await axios.put(
           `${API_BASE_URL}/cart/update`,
           payload,
@@ -437,20 +420,20 @@ export const useCartStore = defineStore("cart", {
             headers: getAuthHeaders(true),
           }
         );
-        console.log(`Cart updated on server: item ${optionId} delta ${sendDelta}`);
+        console.log(`Cart updated on server: item ${optionId} delta ${delta}`);
       } catch (error) {
         console.error("Failed to update cart item quantity:", error);
-        // If server indicates a max allowed value, parse and apply it; otherwise revert to previous
+        // On failure, revert to previous server-synced quantity
         const serverMessage = error?.response?.data?.error || error?.message || '';
         const match = serverMessage.match(/maximum allowed value\s*\((\d+)\)/i);
         if (match) {
           const serverMax = parseInt(match[1], 10);
           if (itemRef) {
-            itemRef.quantity = Math.min(previousQuantity + delta, serverMax);
+            itemRef.quantity = Math.min(currentQuantity, serverMax);
             console.warn(`Adjusted item quantity to server max ${serverMax}`);
           }
-        } else if (itemRef && previousQuantity !== null) {
-          itemRef.quantity = previousQuantity;
+        } else if (itemRef) {
+          itemRef.quantity = Math.max(1, previousQuantity);
         }
       }
     },

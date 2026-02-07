@@ -1,5 +1,5 @@
 <script setup>
-import { useRoute } from 'vue-router';
+import { useRoute, onBeforeRouteUpdate } from 'vue-router';
 import { onMounted } from 'vue';
 import { useProductsStore } from '../stores/productStores';
 import ProductCard from '../components/ProductCard.vue';
@@ -7,23 +7,30 @@ import Loading from '../components/Loading.vue';
 import MiniHeader from '../components/MiniHeader.vue';
 const productStore = useProductsStore();
 
-
 const route = useRoute();
 const query = route.query.q;
 
-onMounted(async () => {
-    await productStore.fetchSearchProducts(query, true)
-    console.log("query", productStore.query)
-})
+const doSearch = (q) => {
+    if (q) productStore.fetchSearchProducts(q, true);
+};
+
+onMounted(() => {
+    doSearch(query);
+});
+
+// Re-fetch when navigating to a different search query without remount
+onBeforeRouteUpdate((to) => {
+    doSearch(to.query.q);
+});
 </script>
 <template>
     <section class="result-container">
         <MiniHeader></MiniHeader>
         <main class="product-content">
-            <h3 v-if="productStore.searchResultProducts.length > 0">Products found for "{{ query }}"</h3>
-            <h3 v-if="productStore.searchResultProducts.length <= 0">No products found for "{{ query }}"</h3>
-            <ProductCard v-if="!productStore.isLoading" typesOfProductList="SearchResultProducts"></ProductCard>
-            <Loading v-if="productStore.isLoading"></Loading>
+            <h3 v-if="!productStore.isSearchLoading && productStore.searchResultProducts.length > 0">Products found for "{{ route.query.q }}"</h3>
+            <h3 v-if="!productStore.isSearchLoading && productStore.searchResultProducts.length <= 0">No products found for "{{ route.query.q }}"</h3>
+            <ProductCard v-if="!productStore.isSearchLoading" typesOfProductList="SearchResultProducts"></ProductCard>
+            <Loading v-if="productStore.isSearchLoading"></Loading>
         </main>
 
     </section>
